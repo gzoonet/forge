@@ -1,0 +1,22 @@
+{
+  "name": "@gzoo/forge-cli",
+  "version": "0.1.0",
+  "description": "Phase 1 CLI test surface for GZOO Forge",
+  "main": "./dist/index.js",
+  "bin": {
+    "forge": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@gzoo/forge-core": "0.1.0",
+    "@gzoo/forge-store": "0.1.0",
+    "@gzoo/forge-extract": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "license": "UNLICENSED"
+}
