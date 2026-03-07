@@ -51,7 +51,12 @@ export class ProjectModelStore {
     }
 
     const { type, ...rest } = event
-    const payload = JSON.stringify(rest)
+    const payload = JSON.stringify(rest, (_, value) => {
+      if (value instanceof Map) {
+        return { __type: 'Map', entries: Array.from(value.entries()) }
+      }
+      return value
+    })
 
     this.db.prepare(`
       INSERT INTO events (event_id, project_id, session_id, turn_index, type, payload, stored_at)
@@ -593,7 +598,12 @@ export class ProjectModelStore {
   }
 
   private rowToStoredEvent(row: EventRow): StoredEvent {
-    const payload = JSON.parse(row.payload)
+    const payload = JSON.parse(row.payload, (_, value) => {
+      if (value && typeof value === 'object' && value.__type === 'Map') {
+        return new Map(value.entries)
+      }
+      return value
+    })
     return {
       ...payload,
       type: row.type,

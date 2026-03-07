@@ -325,6 +325,48 @@ export function brief(): void {
   store.close()
 }
 
+// ── forge artifacts ──────────────────────────────────────────────────────────
+
+export function artifacts(): void {
+  const state = loadState()
+  const store = getStore(state)
+  const m = store.getProjectModel(state!.projectId)
+
+  if (m.artifacts.size === 0) {
+    console.log('\nNo artifacts generated yet.')
+    console.log('Artifacts auto-generate after 3+ committed decisions.\n')
+    store.close()
+    return
+  }
+
+  for (const [, art] of m.artifacts) {
+    console.log(`\n═══ ${art.name} ═══`)
+    console.log(`Type: ${art.type} | Status: ${art.status} | Version: ${art.version}`)
+    console.log(`Decisions: ${art.sourceDecisionIds.length} | Constraints: ${art.sourceConstraintIds.length}`)
+    console.log('')
+
+    // Print the root section content (full spec)
+    const root = art.sections.get(art.rootSectionId)
+    if (root) {
+      console.log(root.content.body)
+    }
+
+    // List sub-sections
+    if (root && root.childSectionIds.length > 0) {
+      console.log(`\n── Sections (${root.childSectionIds.length}) ──`)
+      for (const secId of root.childSectionIds) {
+        const sec = art.sections.get(secId)
+        if (sec) {
+          console.log(`  [${sec.status}] ${sec.title} (v${sec.version})`)
+        }
+      }
+    }
+  }
+
+  console.log('')
+  store.close()
+}
+
 // ── forge test ───────────────────────────────────────────────────────────────
 
 export function test(): void {

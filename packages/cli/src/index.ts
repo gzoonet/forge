@@ -8,7 +8,7 @@ config({ path: path.resolve(__dirname, '../../..', '.env') })
 // Also load .env from cwd (where forge is run)
 config()
 
-import { init, turn, model, events, brief, test } from './commands'
+import { init, turn, model, events, brief, artifacts, test } from './commands'
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -43,6 +43,10 @@ async function main() {
       brief()
       break
 
+    case 'artifacts':
+      artifacts()
+      break
+
     case 'test':
       test()
       break
@@ -56,6 +60,7 @@ async function main() {
       console.log('  forge model                  View current project model')
       console.log('  forge events                 View event log')
       console.log('  forge brief                  View session brief')
+      console.log('  forge artifacts              View generated artifacts')
       console.log('  forge test                   Run behavioral contract tests')
       break
   }

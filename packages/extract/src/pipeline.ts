@@ -18,6 +18,7 @@ import { ProjectModelStore } from '@gzoo/forge-store'
 import type { LLMClient } from './llm-client'
 import { classify } from './classifier'
 import { extract, isExtractable, type ExtractedNode } from './extractor'
+import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
 
 export class ExtractionPipeline {
   constructor(
@@ -87,6 +88,29 @@ export class ExtractionPipeline {
       if (promoCheck) promotionChecks.push(promoCheck)
     }
 
+    // Check if artifact generation should trigger
+    if (modelUpdates.some(u => u.targetLayer === 'decisions')) {
+      const currentModel = this.store.getProjectModel(projectId)
+      const trigger = checkArtifactTrigger(currentModel)
+      if (trigger.shouldGenerate) {
+        try {
+          const artifact = await generateSpecArtifact(
+            currentModel, this.store, this.llmClient,
+            turn.sessionId, turn.turnIndex
+          )
+          modelUpdates.push({
+            operation: 'insert',
+            targetLayer: 'artifacts',
+            nodeId: artifact.id,
+            changes: { name: artifact.name, type: 'spec', status: 'draft' },
+          })
+        } catch (err) {
+          // Artifact generation failure should not break the pipeline
+          console.warn('[forge-extract] Artifact generation failed:', (err as Error).message)
+        }
+      }
+    }
+
     const elapsed = Date.now() - startTime
     if (elapsed > 500) {
       console.warn(`[forge-extract] Turn ${turn.turnIndex} took ${elapsed}ms (target: 500ms)`)
@@ -100,7 +124,7 @@ export class ExtractionPipeline {
       constraintChecksTriggered: modelUpdates.some(u =>
         u.targetLayer === 'constraints' || u.targetLayer === 'decisions'
       ),
-      conflictChecksTriggered: false, // Phase 1: detect but not resolve
+      conflictChecksTriggered: false,
       escalationRequired: false,
     }
   }
