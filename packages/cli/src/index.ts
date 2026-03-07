@@ -8,7 +8,7 @@ config({ path: path.resolve(__dirname, '../../..', '.env') })
 // Also load .env from cwd (where forge is run)
 config()
 
-import { init, turn, model, events, brief, artifacts, tensions, test } from './commands'
+import { init, turn, model, events, brief, artifacts, tensions, actions, execute, test } from './commands'
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -51,6 +51,19 @@ async function main() {
       tensions()
       break
 
+    case 'actions':
+      await actions()
+      break
+
+    case 'execute':
+      if (!args[1]) {
+        console.error('Usage: forge execute <action-id>')
+        console.error('Run: forge actions  — to see available actions')
+        process.exit(1)
+      }
+      await execute(args[1])
+      break
+
     case 'test':
       test()
       break
@@ -66,6 +79,8 @@ async function main() {
       console.log('  forge brief                  View session brief')
       console.log('  forge artifacts              View generated artifacts')
       console.log('  forge tensions               View constraint tensions')
+      console.log('  forge actions                View proposed execution actions')
+      console.log('  forge execute <id>           Approve and execute an action')
       console.log('  forge test                   Run behavioral contract tests')
       break
   }

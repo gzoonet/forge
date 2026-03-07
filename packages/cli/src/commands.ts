@@ -11,6 +11,7 @@ import type {
   CommitmentLevel,
 } from '@gzoo/forge-core'
 import { getDecisionsByCommitment, getActiveExplorations, getUnresolvedTensions } from '@gzoo/forge-store'
+import { ExecutionEngine, GitHubHook } from '@gzoo/forge-execute'
 import { loadState, saveState, getDbPath, ensureStateDir, type ForgeState } from './state'
 
 function getStore(state?: ForgeState | null): ProjectModelStore {
@@ -452,6 +453,127 @@ function findNodeStatement(m: any, nodeId: string): string | null {
   const exploration = m.explorations.get(nodeId)
   if (exploration) return `[exploration] ${exploration.topic}`
   return null
+}
+
+// ── forge actions ───────────────────────────────────────────────────────────
+
+function getExecutionEngine(state: ForgeState): ExecutionEngine {
+  const store = new ProjectModelStore(state.dbPath)
+  const engine = new ExecutionEngine(store, state.projectId)
+
+  // Register available hooks
+  const githubHook = new GitHubHook()
+  engine.registerHook(githubHook)
+
+  return engine
+}
+
+export async function actions(): Promise<void> {
+  const state = loadState()
+  if (!state) {
+    console.error('No active project. Run: forge init "Project name"')
+    return
+  }
+
+  const store = new ProjectModelStore(state.dbPath)
+  const engine = new ExecutionEngine(store, state.projectId)
+  const githubHook = new GitHubHook()
+  engine.registerHook(githubHook)
+
+  const model = store.getProjectModel(state.projectId)
+  const proposals = await engine.proposeActions(model)
+
+  console.log(`\n=== Proposed Actions ===\n`)
+
+  if (proposals.length === 0) {
+    console.log('No actions to propose.')
+    const hooks = engine.getRegisteredHooks()
+    if (hooks.length === 0) {
+      console.log('No execution hooks configured.')
+    } else {
+      const configured = hooks.filter(() => githubHook.isConfigured())
+      console.log(`Hooks: ${hooks.join(', ')} (${configured.length} configured)`)
+      if (!githubHook.isConfigured()) {
+        console.log('\nTo enable GitHub: set GITHUB_TOKEN and GITHUB_OWNER in .env')
+      }
+    }
+    console.log('')
+    store.close()
+    return
+  }
+
+  for (let i = 0; i < proposals.length; i++) {
+    const p = proposals[i]
+    const action = engine.createAction(p)
+    console.log(`  [${i + 1}] ${p.description}`)
+    console.log(`      Service: ${p.service} | Type: ${p.actionType}`)
+    console.log(`      Reason: ${p.reason}`)
+    console.log(`      Action ID: ${action.id}`)
+    if (p.requiresApproval) {
+      console.log(`      Requires approval: yes`)
+    }
+    console.log('')
+  }
+
+  console.log(`Use: forge execute <action-id>  — to approve and execute an action`)
+  console.log('')
+  store.close()
+}
+
+export async function execute(actionId: string): Promise<void> {
+  const state = loadState()
+  if (!state) {
+    console.error('No active project. Run: forge init "Project name"')
+    return
+  }
+
+  if (!actionId) {
+    console.error('Usage: forge execute <action-id>')
+    console.error('Run: forge actions  — to see available actions')
+    return
+  }
+
+  const store = new ProjectModelStore(state.dbPath)
+  const engine = new ExecutionEngine(store, state.projectId)
+  const githubHook = new GitHubHook()
+  engine.registerHook(githubHook)
+
+  // We need to re-propose to get the action registered
+  const model = store.getProjectModel(state.projectId)
+  const proposals = await engine.proposeActions(model)
+
+  // Create all actions so the requested one exists
+  for (const p of proposals) {
+    engine.createAction(p)
+  }
+
+  const action = engine.getAction(actionId)
+  if (!action) {
+    console.error(`Action not found: ${actionId}`)
+    console.error('Run: forge actions  — to see available actions with their IDs')
+    store.close()
+    return
+  }
+
+  console.log(`\nExecuting: ${action.description}`)
+  console.log(`  Service: ${action.service} | Type: ${action.actionType}`)
+
+  const result = await engine.approveAndExecute(actionId, state.sessionId)
+
+  if (result.success) {
+    console.log(`  Status: SUCCESS`)
+    if (result.data) {
+      for (const [key, value] of Object.entries(result.data)) {
+        console.log(`  ${key}: ${value}`)
+      }
+    }
+  } else {
+    console.log(`  Status: FAILED`)
+    console.log(`  Error: ${result.error}`)
+  }
+
+  console.log('')
+  store.close()
 }
 
 // ── forge test ───────────────────────────────────────────────────────────────
