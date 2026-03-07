@@ -8,7 +8,7 @@ config({ path: path.resolve(__dirname, '../../..', '.env') })
 // Also load .env from cwd (where forge is run)
 config()
 
-import { init, turn, model, events, brief, artifacts, tensions, actions, execute, trust, test } from './commands'
+import { init, turn, model, events, brief, artifacts, tensions, actions, execute, trust, workspace, workspaceRebuild, memory, test } from './commands'
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -68,6 +68,23 @@ async function main() {
       trust()
       break
 
+    case 'workspace':
+      workspace()
+      break
+
+    case 'workspace:rebuild':
+      workspaceRebuild()
+      break
+
+    case 'memory':
+      if (!args[1]) {
+        console.error('Usage: forge memory "query text"')
+        console.error('Searches cross-project memory for relevant decisions, rejections, and explorations.')
+        process.exit(1)
+      }
+      await memory(args[1])
+      break
+
     case 'test':
       test()
       break
@@ -86,6 +103,9 @@ async function main() {
       console.log('  forge actions                View proposed execution actions')
       console.log('  forge execute <id>           Approve and execute an action')
       console.log('  forge trust                  View trust calibration metrics')
+      console.log('  forge workspace              View workspace values and risk profile')
+      console.log('  forge workspace:rebuild      Rebuild values model and risk profile')
+      console.log('  forge memory "query"         Search cross-project memory')
       console.log('  forge test                   Run behavioral contract tests')
       break
   }

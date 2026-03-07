@@ -110,6 +110,20 @@ export async function turn(text: string): Promise<void> {
     }
   }
 
+  // Display cross-project memory matches
+  if (result.memoryMatches && result.memoryMatches.length > 0) {
+    console.log('')
+    console.log(`  Cross-project memory (${result.memoryMatches.length} match${result.memoryMatches.length > 1 ? 'es' : ''}):`)
+    for (const match of result.memoryMatches.slice(0, 3)) {
+      const icon = match.nodeType === 'rejection' ? '✗' : '·'
+      console.log(`    ${icon} [${match.projectName}] ${match.statement}`)
+      if (match.outcome) console.log(`      ${match.outcome}`)
+    }
+    if (result.memoryMatches.length > 3) {
+      console.log(`    ... and ${result.memoryMatches.length - 3} more (run: forge memory "...")`)
+    }
+  }
+
   // Display trust-calibrated surfacings
   if (result.surfacingDecisions && result.surfacingDecisions.length > 0) {
     const surfaced = result.surfacingDecisions.filter(s => s.shouldSurface)
@@ -660,6 +674,110 @@ export function trust(): void {
   }
 
   console.log('')
+  store.close()
+}
+
+// ── forge workspace ──────────────────────────────────────────────────────────
+
+export function workspace(): void {
+  const state = loadState()
+  const store = getStore(state)
+
+  // Find the workspace for the current project
+  const m = store.getProjectModel(state!.projectId)
+  const ws = store.getWorkspace(m.workspaceId || 'ws_default')
+
+  if (!ws) {
+    console.log('\nNo workspace found.')
+    store.close()
+    return
+  }
+
+  console.log(`\n═══ Workspace: ${ws.name} ═══`)
+  console.log(`  ID: ${ws.id}`)
+  console.log(`  Projects: ${ws.projectIds.length}`)
+
+  // Values model
+  if (ws.valuesModel.inferredPreferences.length > 0) {
+    console.log(`\n── Inferred Preferences (${ws.valuesModel.inferredPreferences.length}) ──`)
+    for (const pref of ws.valuesModel.inferredPreferences) {
+      console.log(`  [${pref.confidence}] ${pref.statement}`)
+      console.log(`    Evidence: ${pref.evidenceCount} rejection${pref.evidenceCount > 1 ? 's' : ''} across ${pref.sourceProjectIds.length} project${pref.sourceProjectIds.length > 1 ? 's' : ''}`)
+    }
+  } else {
+    console.log('\n  No inferred preferences yet (builds from categorical rejections)')
+  }
+
+  // Risk profile
+  console.log(`\n── Risk Profile ──`)
+  console.log(`  Technical:  ${ws.riskProfile.technical}`)
+  console.log(`  Market:     ${ws.riskProfile.market}`)
+  console.log(`  Financial:  ${ws.riskProfile.financial}`)
+
+  console.log('')
+  store.close()
+}
+
+// ── forge workspace:rebuild ─────────────────────────────────────────────────
+
+export function workspaceRebuild(): void {
+  const state = loadState()
+  const store = getStore(state)
+  const m = store.getProjectModel(state!.projectId)
+  const workspaceId = m.workspaceId || 'ws_default'
+
+  console.log('Rebuilding workspace values model...')
+  const values = store.buildValuesModel(workspaceId)
+  console.log(`  Inferred preferences: ${values.inferredPreferences.length}`)
+
+  console.log('Inferring risk profile...')
+  const risk = store.inferRiskProfile(workspaceId)
+  console.log(`  Technical: ${risk.technical} | Market: ${risk.market} | Financial: ${risk.financial}`)
+
+  console.log('\nDone.')
+  store.close()
+}
+
+// ── forge memory ─────────────────────────────────────────────────────────────
+
+export async function memory(queryText: string): Promise<void> {
+  const state = loadState()
+  if (!state) {
+    console.error('No active project. Run: forge init "Project name"')
+    return
+  }
+
+  const store = new ProjectModelStore(state.dbPath)
+
+  console.log(`Querying cross-project memory for: "${queryText}"`)
+  const result = store.queryMemory({
+    currentDecision: queryText,
+    excludeProjectId: state.projectId,
+  })
+
+  if (result.matches.length === 0) {
+    console.log('\nNo relevant matches found across other projects.')
+    console.log(`(Query time: ${result.queryTime}ms)`)
+    store.close()
+    return
+  }
+
+  console.log(`\n═══ Memory Matches (${result.matches.length}) ═══\n`)
+
+  for (const match of result.matches) {
+    const icon = match.nodeType === 'rejection' ? '✗' :
+                 match.nodeType === 'decision' ? '✓' :
+                 match.nodeType === 'exploration' ? '?' : '·'
+    console.log(`  ${icon} [${match.nodeType}] ${match.statement}`)
+    console.log(`    Project: ${match.projectName} | Relevance: ${match.relevanceScore}%`)
+    if (match.outcome) {
+      console.log(`    Outcome: ${match.outcome}`)
+    }
+    console.log(`    ${match.matchReason}`)
+    console.log('')
+  }
+
+  console.log(`Query time: ${result.queryTime}ms | Source: ${result.source}`)
   store.close()
 }
 

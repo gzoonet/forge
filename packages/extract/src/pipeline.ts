@@ -21,7 +21,7 @@ import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
 import { checkPropagation, applyPropagationResults } from './constraint-engine'
 import { TrustEngine } from './trust-engine'
-import type { SurfacingDecision } from '@gzoo/forge-core'
+import type { SurfacingDecision, MemoryMatch } from '@gzoo/forge-core'
 
 export class ExtractionPipeline {
   private trustEngine: TrustEngine | null = null
@@ -100,6 +100,50 @@ export class ExtractionPipeline {
       // Check for promotion eligibility after write
       const promoCheck = this.checkPromotionEligibility(extracted, projectId, turn.sessionId, turn.turnIndex)
       if (promoCheck) promotionChecks.push(promoCheck)
+    }
+
+    // Stage 2.5: Cross-project memory query for new decisions/explorations
+    let memoryMatches: MemoryMatch[] = []
+    const newDecisions = modelUpdates.filter(u => u.targetLayer === 'decisions' && u.operation === 'insert')
+    const newExplorations = modelUpdates.filter(u => u.targetLayer === 'explorations' && u.operation === 'insert')
+
+    if (newDecisions.length > 0 || newExplorations.length > 0) {
+      try {
+        const currentModel = this.store.getProjectModel(projectId)
+
+        for (const update of newDecisions) {
+          const decision = currentModel.decisions.get(update.nodeId)
+          if (decision) {
+            const result = this.store.queryMemory({
+              currentDecision: decision.statement,
+              categories: [decision.category],
+              excludeProjectId: projectId,
+            })
+            memoryMatches.push(...result.matches)
+          }
+        }
+
+        for (const update of newExplorations) {
+          const exploration = currentModel.explorations.get(update.nodeId)
+          if (exploration) {
+            const result = this.store.queryMemory({
+              currentExploration: exploration.topic,
+              excludeProjectId: projectId,
+            })
+            memoryMatches.push(...result.matches)
+          }
+        }
+
+        // Deduplicate by statement
+        const seen = new Set<string>()
+        memoryMatches = memoryMatches.filter(m => {
+          if (seen.has(m.statement)) return false
+          seen.add(m.statement)
+          return true
+        })
+      } catch {
+        // Memory query failure should not break the pipeline
+      }
     }
 
     // Stage 3: Constraint propagation check for new decisions
@@ -188,6 +232,7 @@ export class ExtractionPipeline {
       conflictChecksTriggered,
       escalationRequired,
       escalationReason,
+      memoryMatches: memoryMatches.length > 0 ? memoryMatches : undefined,
     }
 
     // Stage 4: Trust calibration — decide what to surface

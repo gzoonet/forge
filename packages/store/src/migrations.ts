@@ -66,6 +66,28 @@ CREATE TABLE IF NOT EXISTS surfacing_events (
 
 CREATE INDEX IF NOT EXISTS idx_surfacing_session ON surfacing_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_surfacing_type ON surfacing_events(type);
+
+-- Workspace registry
+CREATE TABLE IF NOT EXISTS workspaces (
+  workspace_id TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  values_model TEXT NOT NULL DEFAULT '{"inferredPreferences":[],"statedPrinciples":[],"updatedAt":"2026-01-01T00:00:00.000Z"}',
+  risk_profile TEXT NOT NULL DEFAULT '{"technical":"moderate","market":"moderate","financial":"moderate"}',
+  cortex_config TEXT
+);
+
+-- Workspace-project mapping
+CREATE TABLE IF NOT EXISTS workspace_projects (
+  workspace_id TEXT NOT NULL,
+  project_id   TEXT NOT NULL,
+  added_at     TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wp_workspace ON workspace_projects(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_wp_project ON workspace_projects(project_id);
 `
 
 export function runMigrations(db: Database.Database): void {

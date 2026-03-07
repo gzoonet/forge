@@ -20,6 +20,13 @@ import {
   type SurfacingEvent,
   type SurfacingType,
   type TrustMetrics,
+  type Workspace,
+  type ValuesModel,
+  type RiskProfile,
+  type InferredPreference,
+  type MemoryMatch,
+  type MemoryQuery,
+  type MemoryResult,
 } from '@gzoo/forge-core'
 import type { ForgeEvent, StoredEvent, StoredTurn } from './events'
 import { runMigrations } from './migrations'
@@ -244,10 +251,84 @@ export class ProjectModelStore {
     }).filter((c): c is ModelChange => c !== null)
   }
 
+  // ── Workspace Lifecycle ────────────────────────────────────────────────────
+
+  createWorkspace(name: string): string {
+    const id = `ws_${nanoid(10)}`
+    const now = new Date().toISOString()
+
+    this.db.prepare(`
+      INSERT INTO workspaces (workspace_id, name, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, name, now, now)
+
+    return id
+  }
+
+  getWorkspace(workspaceId: string): Workspace | null {
+    const row = this.db.prepare(`
+      SELECT workspace_id, name, created_at, updated_at, values_model, risk_profile, cortex_config
+      FROM workspaces WHERE workspace_id = ?
+    `).get(workspaceId) as WorkspaceRow | undefined
+
+    if (!row) return null
+
+    const projectRows = this.db.prepare(`
+      SELECT project_id FROM workspace_projects WHERE workspace_id = ?
+    `).all(workspaceId) as { project_id: string }[]
+
+    return {
+      id: row.workspace_id,
+      name: row.name,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+      valuesModel: JSON.parse(row.values_model),
+      riskProfile: JSON.parse(row.risk_profile),
+      globalConstraints: new Map(),
+      integrations: [],
+      projectIds: projectRows.map(r => r.project_id),
+    }
+  }
+
+  updateValuesModel(workspaceId: string, valuesModel: ValuesModel): void {
+    this.db.prepare(`
+      UPDATE workspaces SET values_model = ?, updated_at = ? WHERE workspace_id = ?
+    `).run(JSON.stringify(valuesModel), new Date().toISOString(), workspaceId)
+  }
+
+  updateRiskProfile(workspaceId: string, riskProfile: RiskProfile): void {
+    this.db.prepare(`
+      UPDATE workspaces SET risk_profile = ?, updated_at = ? WHERE workspace_id = ?
+    `).run(JSON.stringify(riskProfile), new Date().toISOString(), workspaceId)
+  }
+
   // ── Project Lifecycle ──────────────────────────────────────────────────────
 
   createProject(workspaceId: string, name: string): NodeId {
     const projectId = createId('project')
+
+    // Ensure workspace exists
+    const wsExists = this.db.prepare(`
+      SELECT 1 FROM workspaces WHERE workspace_id = ?
+    `).get(workspaceId)
+    if (!wsExists) {
+      this.createWorkspace(workspaceId === 'ws_default' ? 'Default Workspace' : workspaceId)
+      // If workspace was auto-created with a different ID, fix it
+      if (workspaceId === 'ws_default') {
+        this.db.prepare(`DELETE FROM workspaces WHERE workspace_id != ?`).run(workspaceId)
+        const now = new Date().toISOString()
+        this.db.prepare(`
+          INSERT OR IGNORE INTO workspaces (workspace_id, name, created_at, updated_at)
+          VALUES (?, ?, ?, ?)
+        `).run('ws_default', 'Default Workspace', now, now)
+      }
+    }
+
+    // Link project to workspace
+    this.db.prepare(`
+      INSERT OR IGNORE INTO workspace_projects (workspace_id, project_id, added_at)
+      VALUES (?, ?, ?)
+    `).run(workspaceId, projectId, new Date().toISOString())
 
     this.appendEvent(
       { type: 'PROJECT_CREATED', projectId, workspaceId, name },
@@ -255,6 +336,213 @@ export class ProjectModelStore {
     )
 
     return projectId
+  }
+
+  // ── Cross-Project Memory ────────────────────────────────────────────────────
+
+  queryMemory(query: MemoryQuery): MemoryResult {
+    const startTime = Date.now()
+    const matches: MemoryMatch[] = []
+
+    // Get all project IDs in this workspace (excluding current project if specified)
+    const projectRows = this.db.prepare(`
+      SELECT DISTINCT project_id FROM events WHERE type = 'PROJECT_CREATED'
+    `).all() as { project_id: string }[]
+
+    const projectIds = projectRows
+      .map(r => r.project_id)
+      .filter(id => id !== query.excludeProjectId)
+
+    for (const projectId of projectIds) {
+      const model = this.getProjectModel(projectId)
+
+      // Search decisions for relevant matches
+      if (query.currentDecision) {
+        for (const [, decision] of model.decisions) {
+          if (query.categories && !query.categories.includes(decision.category)) continue
+          const score = this.computeRelevance(query.currentDecision, decision.statement)
+          if (score >= 30) {
+            matches.push({
+              projectId,
+              projectName: model.name,
+              nodeType: 'decision',
+              statement: decision.statement,
+              category: decision.category,
+              outcome: decision.commitment === 'locked'
+                ? 'Locked — became load-bearing'
+                : decision.commitment === 'decided'
+                ? 'Committed'
+                : undefined,
+              relevanceScore: score,
+              matchReason: `Similar decision in "${model.name}"`,
+            })
+          }
+        }
+
+        // Search rejections — what was ruled out and why
+        for (const [, rejection] of model.rejections) {
+          const score = this.computeRelevance(query.currentDecision, rejection.statement)
+          if (score >= 30) {
+            matches.push({
+              projectId,
+              projectName: model.name,
+              nodeType: 'rejection',
+              statement: rejection.statement,
+              category: rejection.category,
+              outcome: `Rejected: ${rejection.reason}`,
+              relevanceScore: score + 10, // Rejections are extra valuable
+              matchReason: `Previously rejected in "${model.name}" — ${rejection.reason}`,
+            })
+          }
+        }
+      }
+
+      // Search explorations for related topics
+      if (query.currentExploration) {
+        for (const [, exploration] of model.explorations) {
+          const score = this.computeRelevance(query.currentExploration, exploration.topic)
+          if (score >= 30) {
+            matches.push({
+              projectId,
+              projectName: model.name,
+              nodeType: 'exploration',
+              statement: exploration.topic,
+              outcome: exploration.status === 'resolved'
+                ? `Resolved → ${exploration.resolvedToDecisionId ?? 'decided'}`
+                : exploration.status,
+              relevanceScore: score,
+              matchReason: `Explored in "${model.name}"`,
+            })
+          }
+        }
+      }
+    }
+
+    // Sort by relevance, cap at 5
+    matches.sort((a, b) => b.relevanceScore - a.relevanceScore)
+    const topMatches = matches.slice(0, 5)
+
+    return {
+      matches: topMatches,
+      queryTime: Date.now() - startTime,
+      source: 'local',
+    }
+  }
+
+  buildValuesModel(workspaceId: string): ValuesModel {
+    // Get all projects in this workspace
+    const projectRows = this.db.prepare(`
+      SELECT project_id FROM workspace_projects WHERE workspace_id = ?
+    `).all(workspaceId) as { project_id: string }[]
+
+    const preferences: Map<string, InferredPreference> = new Map()
+
+    for (const { project_id } of projectRows) {
+      const model = this.getProjectModel(project_id)
+
+      // Build preferences from categorical rejections
+      for (const [, rejection] of model.rejections) {
+        if (rejection.rejectionType !== 'categorical') continue
+        if (!rejection.revealsPreference) continue
+
+        const key = rejection.revealsPreference.toLowerCase()
+        const existing = preferences.get(key)
+
+        if (existing) {
+          existing.evidenceCount++
+          existing.sourceRejectionIds.push(rejection.id)
+          if (!existing.sourceProjectIds.includes(project_id)) {
+            existing.sourceProjectIds.push(project_id)
+          }
+          // More evidence → higher confidence
+          existing.confidence = existing.evidenceCount >= 3 ? 'high' :
+                                existing.evidenceCount >= 2 ? 'medium' : 'low'
+        } else {
+          preferences.set(key, {
+            statement: rejection.revealsPreference,
+            confidence: 'low',
+            evidenceCount: 1,
+            sourceRejectionIds: [rejection.id],
+            sourceDecisionIds: [],
+            sourceProjectIds: [project_id],
+          })
+        }
+      }
+    }
+
+    const valuesModel: ValuesModel = {
+      inferredPreferences: Array.from(preferences.values()),
+      statedPrinciples: [], // Populated by explicit user statements
+      updatedAt: new Date(),
+    }
+
+    // Persist to workspace
+    this.updateValuesModel(workspaceId, valuesModel)
+
+    return valuesModel
+  }
+
+  inferRiskProfile(workspaceId: string): RiskProfile {
+    const projectRows = this.db.prepare(`
+      SELECT project_id FROM workspace_projects WHERE workspace_id = ?
+    `).all(workspaceId) as { project_id: string }[]
+
+    let techConservative = 0, techAggressive = 0
+    let marketConservative = 0, marketAggressive = 0
+    let financialConservative = 0, financialAggressive = 0
+    let total = 0
+
+    for (const { project_id } of projectRows) {
+      const model = this.getProjectModel(project_id)
+
+      for (const [, decision] of model.decisions) {
+        total++
+        // Technical risk signals
+        if (decision.category === 'technical') {
+          if (decision.certainty === 'validated' || decision.certainty === 'evidenced') {
+            techConservative++
+          } else if (decision.certainty === 'assumed') {
+            techAggressive++
+          }
+        }
+        // Market risk signals
+        if (decision.category === 'market') {
+          if (decision.alternatives.length > 2) marketConservative++
+          else marketAggressive++
+        }
+        // Financial risk signals
+        if (decision.category === 'business') {
+          if (decision.certainty === 'validated') financialConservative++
+          else if (decision.certainty === 'assumed') financialAggressive++
+        }
+      }
+    }
+
+    const classify = (cons: number, agg: number): 'conservative' | 'moderate' | 'aggressive' => {
+      if (total === 0) return 'moderate'
+      if (cons > agg * 2) return 'conservative'
+      if (agg > cons * 2) return 'aggressive'
+      return 'moderate'
+    }
+
+    const profile: RiskProfile = {
+      technical: classify(techConservative, techAggressive),
+      market: classify(marketConservative, marketAggressive),
+      financial: classify(financialConservative, financialAggressive),
+    }
+
+    this.updateRiskProfile(workspaceId, profile)
+    return profile
+  }
+
+  private computeRelevance(query: string, target: string): number {
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    const targetWords = target.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    if (queryWords.length === 0 || targetWords.length === 0) return 0
+
+    const overlap = queryWords.filter(w => targetWords.includes(w))
+    const overlapRatio = overlap.length / Math.max(queryWords.length, 1)
+    return Math.min(100, Math.round(overlapRatio * 100) + (overlap.length * 10))
   }
 
   // ── Internal ───────────────────────────────────────────────────────────────
@@ -779,4 +1067,14 @@ type SurfacingRow = {
   was_acknowledged: number
   user_response: string | null
   was_helpful: number | null
+}
+
+type WorkspaceRow = {
+  workspace_id: string
+  name: string
+  created_at: string
+  updated_at: string
+  values_model: string
+  risk_profile: string
+  cortex_config: string | null
 }

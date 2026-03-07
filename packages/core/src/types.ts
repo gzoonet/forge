@@ -409,6 +409,7 @@ export type ExtractionResult = {
   escalationRequired: boolean
   escalationReason?: string
   surfacingDecisions?: SurfacingDecision[]
+  memoryMatches?: MemoryMatch[]
 }
 
 // ─── Session Brief ───────────────────────────────────────────────────────────
@@ -583,4 +584,30 @@ export type Workspace = {
     cortexProjectPaths: string[]
     lastSyncedAt?: Date
   }
+}
+
+// ─── Historical Memory (Cortex Integration) ────────────────────────────────
+
+export type MemoryMatch = {
+  projectId: NodeId
+  projectName: string
+  nodeType: 'decision' | 'rejection' | 'constraint' | 'exploration'
+  statement: string
+  category?: string
+  outcome?: string                     // What happened after this decision
+  relevanceScore: number               // 0-100, how relevant to current context
+  matchReason: string                  // Why this was surfaced
+}
+
+export type MemoryQuery = {
+  currentDecision?: string             // Decision being made now
+  currentExploration?: string          // Exploration being considered
+  categories?: string[]                // Filter by decision categories
+  excludeProjectId?: NodeId            // Don't include current project
+}
+
+export type MemoryResult = {
+  matches: MemoryMatch[]
+  queryTime: number                    // ms
+  source: 'local' | 'cortex'          // Where the memory came from
 }
