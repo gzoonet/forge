@@ -17,6 +17,9 @@ import {
   type TurnClassification,
   type ExtractionResult,
   type CommitmentLevel,
+  type SurfacingEvent,
+  type SurfacingType,
+  type TrustMetrics,
 } from '@gzoo/forge-core'
 import type { ForgeEvent, StoredEvent, StoredTurn } from './events'
 import { runMigrations } from './migrations'
@@ -629,6 +632,113 @@ export class ProjectModelStore {
     }
   }
 
+  // ── Surfacing (Trust Calibration) ─────────────────────────────────────────
+
+  recordSurfacing(event: {
+    type: SurfacingType
+    sessionId: string
+    projectId: NodeId
+    turnIndex: number
+    targetNodeIds: NodeId[]
+    message: string
+  }): SurfacingEvent {
+    const id = nanoid(10)
+    const surfacedAt = new Date()
+
+    this.db.prepare(`
+      INSERT INTO surfacing_events (id, type, session_id, project_id, turn_index, surfaced_at, target_node_ids, message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, event.type, event.sessionId, event.projectId, event.turnIndex, surfacedAt.toISOString(), JSON.stringify(event.targetNodeIds), event.message)
+
+    return {
+      id,
+      type: event.type,
+      sessionId: event.sessionId,
+      turnIndex: event.turnIndex,
+      surfacedAt,
+      targetNodeIds: event.targetNodeIds,
+      message: event.message,
+      wasAcknowledged: false,
+    }
+  }
+
+  acknowledgeSurfacing(id: string, response?: string, helpful?: boolean): void {
+    this.db.prepare(`
+      UPDATE surfacing_events SET was_acknowledged = 1, user_response = ?, was_helpful = ?
+      WHERE id = ?
+    `).run(response ?? null, helpful != null ? (helpful ? 1 : 0) : null, id)
+  }
+
+  getSessionSurfacings(sessionId: string): SurfacingEvent[] {
+    const rows = this.db.prepare(`
+      SELECT id, type, session_id, turn_index, surfaced_at, target_node_ids, message, was_acknowledged, user_response, was_helpful
+      FROM surfacing_events WHERE session_id = ? ORDER BY surfaced_at
+    `).all(sessionId) as SurfacingRow[]
+
+    return rows.map(this.rowToSurfacingEvent)
+  }
+
+  getRecentSurfacings(projectId: NodeId, limit: number = 20): SurfacingEvent[] {
+    const rows = this.db.prepare(`
+      SELECT id, type, session_id, turn_index, surfaced_at, target_node_ids, message, was_acknowledged, user_response, was_helpful
+      FROM surfacing_events WHERE project_id = ? ORDER BY surfaced_at DESC LIMIT ?
+    `).all(projectId, limit) as SurfacingRow[]
+
+    return rows.map(this.rowToSurfacingEvent)
+  }
+
+  hasSurfacedForNodes(sessionId: string, type: SurfacingType, nodeIds: NodeId[]): boolean {
+    const rows = this.db.prepare(`
+      SELECT target_node_ids FROM surfacing_events
+      WHERE session_id = ? AND type = ?
+    `).all(sessionId, type) as { target_node_ids: string }[]
+
+    for (const row of rows) {
+      const surfacedIds: NodeId[] = JSON.parse(row.target_node_ids)
+      if (nodeIds.some(id => surfacedIds.includes(id))) return true
+    }
+    return false
+  }
+
+  getTrustMetrics(sessionId: string): TrustMetrics {
+    const surfacings = this.getSessionSurfacings(sessionId)
+
+    return {
+      sessionId,
+      totalSurfacings: surfacings.length,
+      acknowledgedSurfacings: surfacings.filter(s => s.wasAcknowledged).length,
+      ignoredSurfacings: surfacings.filter(s => !s.wasAcknowledged).length,
+      correctionsThisSession: this.countCorrections(sessionId),
+      falseEscalations: surfacings.filter(s => s.type === 'escalation' && s.wasAcknowledged && s.wasHelpful === false).length,
+      helpfulSurfacings: surfacings.filter(s => s.wasHelpful === true).length,
+      flowInterruptions: 0, // Calculated by trust engine, not stored
+      suppressedSurfacings: 0, // Tracked in-memory by trust engine
+    }
+  }
+
+  private countCorrections(sessionId: string): number {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count FROM events
+      WHERE session_id = ? AND type = 'CORRECTION_APPLIED'
+    `).get(sessionId) as { count: number }
+    return row.count
+  }
+
+  private rowToSurfacingEvent(row: SurfacingRow): SurfacingEvent {
+    return {
+      id: row.id,
+      type: row.type as SurfacingType,
+      sessionId: row.session_id,
+      turnIndex: row.turn_index,
+      surfacedAt: new Date(row.surfaced_at),
+      targetNodeIds: JSON.parse(row.target_node_ids),
+      message: row.message,
+      wasAcknowledged: row.was_acknowledged === 1,
+      userResponse: row.user_response ?? undefined,
+      wasHelpful: row.was_helpful != null ? row.was_helpful === 1 : undefined,
+    }
+  }
+
   close(): void {
     this.db.close()
   }
@@ -656,4 +766,17 @@ type TurnRow = {
   timestamp: string
   classification: string | null
   extraction_result: string | null
+}
+
+type SurfacingRow = {
+  id: string
+  type: string
+  session_id: string
+  turn_index: number
+  surfaced_at: string
+  target_node_ids: string
+  message: string
+  was_acknowledged: number
+  user_response: string | null
+  was_helpful: number | null
 }

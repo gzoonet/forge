@@ -48,6 +48,24 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
+
+-- Surfacing events — trust calibration tracking
+CREATE TABLE IF NOT EXISTS surfacing_events (
+  id           TEXT PRIMARY KEY,
+  type         TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  project_id   TEXT NOT NULL,
+  turn_index   INTEGER NOT NULL,
+  surfaced_at  TEXT NOT NULL,
+  target_node_ids TEXT NOT NULL,
+  message      TEXT NOT NULL,
+  was_acknowledged INTEGER DEFAULT 0,
+  user_response TEXT,
+  was_helpful  INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_surfacing_session ON surfacing_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_surfacing_type ON surfacing_events(type);
 `
 
 export function runMigrations(db: Database.Database): void {

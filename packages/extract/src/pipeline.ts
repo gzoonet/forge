@@ -20,12 +20,25 @@ import { classify } from './classifier'
 import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
 import { checkPropagation, applyPropagationResults } from './constraint-engine'
+import { TrustEngine } from './trust-engine'
+import type { SurfacingDecision } from '@gzoo/forge-core'
 
 export class ExtractionPipeline {
+  private trustEngine: TrustEngine | null = null
+
   constructor(
     private store: ProjectModelStore,
     private llmClient: LLMClient
   ) {}
+
+  initTrust(projectId: NodeId, sessionId: string): TrustEngine {
+    this.trustEngine = new TrustEngine(this.store, projectId, sessionId)
+    return this.trustEngine
+  }
+
+  getTrustEngine(): TrustEngine | null {
+    return this.trustEngine
+  }
 
   async processTurn(
     turn: ConversationalTurn,
@@ -164,7 +177,7 @@ export class ExtractionPipeline {
       console.warn(`[forge-extract] Turn ${turn.turnIndex} took ${elapsed}ms (target: 500ms)`)
     }
 
-    return {
+    const result: ExtractionResult = {
       turnRef: { sessionId: turn.sessionId, turnIndex: turn.turnIndex },
       classifications: [{ type: classification.primary, confidence: classification.confidence, additionalTypes: classification.additional }],
       modelUpdates,
@@ -176,6 +189,26 @@ export class ExtractionPipeline {
       escalationRequired,
       escalationReason,
     }
+
+    // Stage 4: Trust calibration — decide what to surface
+    if (this.trustEngine) {
+      this.trustEngine.updateFlowState(turn.turnIndex, result)
+      const currentModel = this.store.getProjectModel(projectId)
+      const surfacingDecisions = this.trustEngine.evaluateSurfacings(
+        turn.turnIndex, result, currentModel
+      )
+      result.surfacingDecisions = surfacingDecisions
+
+      // Auto-record surfacings that passed all gates
+      for (const sd of surfacingDecisions) {
+        if (sd.shouldSurface && sd.suggestedMessage && sd.type) {
+          const nodeIds = sd.targetNodeIds ?? []
+          this.trustEngine.recordSurfacing(sd.type, turn.turnIndex, nodeIds, sd.suggestedMessage)
+        }
+      }
+    }
+
+    return result
   }
 
   private async getRecentContext(sessionId: string, currentTurnIndex: number): Promise<string> {

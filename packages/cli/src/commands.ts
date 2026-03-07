@@ -1,5 +1,5 @@
 import { ProjectModelStore } from '@gzoo/forge-store'
-import { ExtractionPipeline, createLLMClient, resolveProviderConfig } from '@gzoo/forge-extract'
+import { ExtractionPipeline, TrustEngine, createLLMClient, resolveProviderConfig } from '@gzoo/forge-extract'
 import type { LLMClient } from '@gzoo/forge-extract'
 import type {
   ConversationalTurn,
@@ -70,6 +70,7 @@ export async function turn(text: string): Promise<void> {
   const store = new ProjectModelStore(state.dbPath)
   const llm = getLLMClient()
   const pipeline = new ExtractionPipeline(store, llm)
+  pipeline.initTrust(state.projectId, state.sessionId)
 
   const conversationalTurn: ConversationalTurn = {
     sessionId: state.sessionId,
@@ -109,18 +110,42 @@ export async function turn(text: string): Promise<void> {
     }
   }
 
-  // Display constraint propagation results
-  if (result.escalationRequired) {
-    console.log('')
-    console.log(`  ⚠ CONSTRAINT CONFLICT DETECTED`)
-    if (result.escalationReason) {
-      console.log(`    ${result.escalationReason}`)
+  // Display trust-calibrated surfacings
+  if (result.surfacingDecisions && result.surfacingDecisions.length > 0) {
+    const surfaced = result.surfacingDecisions.filter(s => s.shouldSurface)
+    const suppressed = result.surfacingDecisions.filter(s => !s.shouldSurface)
+
+    for (const s of surfaced) {
+      console.log('')
+      const icon = s.priority === 'critical' ? '!!!' :
+                   s.priority === 'high' ? '!! ' :
+                   s.priority === 'medium' ? '!  ' : '   '
+      console.log(`  [${icon}] ${s.suggestedMessage ?? s.reason}`)
     }
-    console.log('    Run: forge tensions  — to see details')
-  } else if (result.conflictChecksTriggered) {
-    const tensionUpdates = result.modelUpdates.filter(u => u.targetLayer === 'tensions')
-    if (tensionUpdates.length > 0) {
-      console.log(`  Tensions detected: ${tensionUpdates.length} (run: forge tensions)`)
+
+    if (suppressed.length > 0) {
+      // Show suppression count but not details — trust engine working quietly
+      const trustEngine = pipeline.getTrustEngine()
+      if (trustEngine?.getFlowState().isInFlow) {
+        // Don't even mention suppressions during flow
+      } else {
+        console.log(`  (${suppressed.length} notification${suppressed.length > 1 ? 's' : ''} suppressed)`)
+      }
+    }
+  } else {
+    // Fallback for when trust engine isn't active
+    if (result.escalationRequired) {
+      console.log('')
+      console.log(`  ⚠ CONSTRAINT CONFLICT DETECTED`)
+      if (result.escalationReason) {
+        console.log(`    ${result.escalationReason}`)
+      }
+      console.log('    Run: forge tensions  — to see details')
+    } else if (result.conflictChecksTriggered) {
+      const tensionUpdates = result.modelUpdates.filter(u => u.targetLayer === 'tensions')
+      if (tensionUpdates.length > 0) {
+        console.log(`  Tensions detected: ${tensionUpdates.length} (run: forge tensions)`)
+      }
     }
   }
 
@@ -570,6 +595,68 @@ export async function execute(actionId: string): Promise<void> {
   } else {
     console.log(`  Status: FAILED`)
     console.log(`  Error: ${result.error}`)
+  }
+
+  console.log('')
+  store.close()
+}
+
+// ── forge trust ──────────────────────────────────────────────────────────────
+
+export function trust(): void {
+  const state = loadState()
+  const store = getStore(state)
+
+  console.log(`\n═══ Trust Calibration ═══\n`)
+
+  // Get surfacing history for current session
+  const surfacings = store.getSessionSurfacings(state!.sessionId)
+  const metrics = store.getTrustMetrics(state!.sessionId)
+
+  // Metrics summary
+  console.log('── Session Metrics ──')
+  console.log(`  Total surfacings:      ${metrics.totalSurfacings}`)
+  console.log(`  Acknowledged:          ${metrics.acknowledgedSurfacings}`)
+  console.log(`  Ignored:               ${metrics.ignoredSurfacings}`)
+  console.log(`  Corrections:           ${metrics.correctionsThisSession}`)
+  if (metrics.falseEscalations > 0) {
+    console.log(`  False escalations:     ${metrics.falseEscalations}`)
+  }
+  if (metrics.helpfulSurfacings > 0) {
+    console.log(`  Helpful:               ${metrics.helpfulSurfacings}`)
+  }
+
+  // Acknowledgment rate
+  if (metrics.totalSurfacings > 0) {
+    const ackRate = Math.round((metrics.acknowledgedSurfacings / metrics.totalSurfacings) * 100)
+    console.log(`  Acknowledgment rate:   ${ackRate}%`)
+    if (ackRate < 50) {
+      console.log('  → Low ack rate suggests over-interrupting. Consider raising thresholds.')
+    }
+  }
+
+  // Surfacing history
+  if (surfacings.length > 0) {
+    console.log(`\n── Surfacing History ──`)
+    for (const s of surfacings) {
+      const ack = s.wasAcknowledged ? '✓' : '○'
+      const time = s.surfacedAt.toISOString().slice(11, 19)
+      console.log(`  [${time}] ${ack} [${s.type}] ${s.message.slice(0, 80)}`)
+      if (s.userResponse) {
+        console.log(`    Response: ${s.userResponse}`)
+      }
+    }
+  }
+
+  // Correction frequency (extraction quality signal)
+  if (metrics.correctionsThisSession > 0) {
+    const turns = state!.turnIndex
+    const correctionRate = Math.round((metrics.correctionsThisSession / Math.max(turns, 1)) * 100)
+    console.log(`\n── Extraction Quality ──`)
+    console.log(`  Corrections: ${metrics.correctionsThisSession} in ${turns} turns (${correctionRate}%)`)
+    if (correctionRate > 20) {
+      console.log('  → High correction rate suggests extraction needs tuning.')
+    }
   }
 
   console.log('')

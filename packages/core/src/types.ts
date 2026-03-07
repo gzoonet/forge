@@ -408,6 +408,7 @@ export type ExtractionResult = {
   conflictChecksTriggered: boolean
   escalationRequired: boolean
   escalationReason?: string
+  surfacingDecisions?: SurfacingDecision[]
 }
 
 // ─── Session Brief ───────────────────────────────────────────────────────────
@@ -472,6 +473,68 @@ export type Session = {
   }
   escalations: Escalation[]
   sessionGoal?: string
+}
+
+// ─── Trust Calibration ──────────────────────────────────────────────────────
+
+export type SurfacingType =
+  | 'promotion_suggestion'     // Leaning → decided prompt
+  | 'constraint_conflict'      // Stated vs revealed conflict
+  | 'escalation'              // Constraint propagation escalation
+  | 'scope_drift'             // Scope creep detection
+  | 'tension_detected'        // New tension surfaced
+  | 'locked_notification'     // Decision locked notification
+  | 'artifact_ready'          // Artifact ready for review
+  | 'session_brief'           // Session brief on return
+
+export type SurfacingEvent = {
+  id: string
+  type: SurfacingType
+  sessionId: string
+  turnIndex: number
+  surfacedAt: Date
+  targetNodeIds: NodeId[]        // What nodes this surfacing is about
+  message: string                // The message shown to the user
+  wasAcknowledged: boolean       // Did the user respond?
+  userResponse?: string          // What did they say?
+  wasHelpful?: boolean           // Post-hoc: did this help or annoy?
+}
+
+export type FlowState = {
+  isInFlow: boolean
+  consecutiveProductiveTurns: number  // Turns with decisions/progress, no confusion
+  lastInterruptionTurn: number        // When we last interrupted
+  turnsSinceInterruption: number      // How many turns since last interruption
+  sessionStartTurn: number
+}
+
+export type InterruptionBudget = {
+  maxInterruptionsPerSession: number   // Default: 5
+  interruptionsUsed: number
+  remainingBudget: number
+  cooldownTurns: number                // Min turns between interruptions (default: 3)
+}
+
+export type TrustMetrics = {
+  sessionId: string
+  totalSurfacings: number
+  acknowledgedSurfacings: number
+  ignoredSurfacings: number
+  correctionsThisSession: number       // Corrections = extraction quality signal
+  falseEscalations: number             // Escalations user dismissed
+  helpfulSurfacings: number            // Surfacings user acted on
+  flowInterruptions: number            // Times we broke flow
+  suppressedSurfacings: number         // Things we chose NOT to surface
+}
+
+export type SurfacingDecision = {
+  shouldSurface: boolean
+  reason: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  type?: SurfacingType                  // What kind of surfacing this is
+  targetNodeIds?: NodeId[]              // Which nodes this is about
+  suggestedMessage?: string
+  suppressedBecause?: string           // If not surfacing, why
 }
 
 // ─── Workspace ───────────────────────────────────────────────────────────────
