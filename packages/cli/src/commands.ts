@@ -1,5 +1,5 @@
 import { ProjectModelStore } from '@gzoo/forge-store'
-import { ExtractionPipeline, AnthropicClient } from '@gzoo/forge-extract'
+import { ExtractionPipeline, createLLMClient, resolveProviderConfig } from '@gzoo/forge-extract'
 import type { LLMClient } from '@gzoo/forge-extract'
 import type {
   ConversationalTurn,
@@ -20,12 +20,14 @@ function getStore(state?: ForgeState | null): ProjectModelStore {
 }
 
 function getLLMClient(): LLMClient {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('Error: ANTHROPIC_API_KEY environment variable is required.')
-    console.error('Set it with: export ANTHROPIC_API_KEY=your-key-here')
+  try {
+    const config = resolveProviderConfig()
+    return createLLMClient(config)
+  } catch (err: any) {
+    console.error(`Error: ${err.message}`)
+    console.error('See .env.example for configuration options.')
     process.exit(1)
   }
-  return new AnthropicClient()
 }
 
 // ── forge init ───────────────────────────────────────────────────────────────

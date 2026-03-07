@@ -1,5 +1,13 @@
 #!/usr/bin/env node
 
+import * as path from 'path'
+import { config } from 'dotenv'
+
+// Load .env from project root (two levels up from packages/cli)
+config({ path: path.resolve(__dirname, '../../..', '.env') })
+// Also load .env from cwd (where forge is run)
+config()
+
 import { init, turn, model, events, brief, test } from './commands'
 
 const args = process.argv.slice(2)
