@@ -108,6 +108,21 @@ export async function turn(text: string): Promise<void> {
     }
   }
 
+  // Display constraint propagation results
+  if (result.escalationRequired) {
+    console.log('')
+    console.log(`  ⚠ CONSTRAINT CONFLICT DETECTED`)
+    if (result.escalationReason) {
+      console.log(`    ${result.escalationReason}`)
+    }
+    console.log('    Run: forge tensions  — to see details')
+  } else if (result.conflictChecksTriggered) {
+    const tensionUpdates = result.modelUpdates.filter(u => u.targetLayer === 'tensions')
+    if (tensionUpdates.length > 0) {
+      console.log(`  Tensions detected: ${tensionUpdates.length} (run: forge tensions)`)
+    }
+  }
+
   saveState(state)
   store.close()
 }
@@ -365,6 +380,78 @@ export function artifacts(): void {
 
   console.log('')
   store.close()
+}
+
+// ── forge tensions ──────────────────────────────────────────────────────────
+
+export function tensions(): void {
+  const state = loadState()
+  const store = getStore(state)
+  const m = store.getProjectModel(state!.projectId)
+
+  const allTensions = Array.from(m.tensions.values())
+  const active = allTensions.filter(t => t.status === 'active')
+  const resolved = allTensions.filter(t => t.status === 'resolved')
+  const acknowledged = allTensions.filter(t => t.status === 'acknowledged')
+
+  console.log(`\n═══ Constraint Tensions ═══\n`)
+
+  if (active.length === 0 && acknowledged.length === 0) {
+    console.log('No active tensions.')
+    if (resolved.length > 0) {
+      console.log(`(${resolved.length} resolved tension${resolved.length > 1 ? 's' : ''} in history)`)
+    }
+    console.log('')
+    store.close()
+    return
+  }
+
+  if (active.length > 0) {
+    console.log(`Active (${active.length}):`)
+    for (const t of active) {
+      const icon = t.severity === 'blocking' ? '!!!' :
+                   t.severity === 'significant' ? '!! ' : 'i  '
+      console.log(`  [${icon}] ${t.description}`)
+      console.log(`    Between: ${t.nodeAId} <-> ${t.nodeBId}`)
+      console.log(`    Severity: ${t.severity}`)
+
+      // Try to show what the conflicting nodes actually are
+      const nodeA = findNodeStatement(m, t.nodeAId)
+      const nodeB = findNodeStatement(m, t.nodeBId)
+      if (nodeA) console.log(`    Node A: ${nodeA}`)
+      if (nodeB) console.log(`    Node B: ${nodeB}`)
+      console.log('')
+    }
+  }
+
+  if (acknowledged.length > 0) {
+    console.log(`Acknowledged (${acknowledged.length}):`)
+    for (const t of acknowledged) {
+      console.log(`  [ack] ${t.description}`)
+    }
+    console.log('')
+  }
+
+  if (resolved.length > 0) {
+    console.log(`Resolved (${resolved.length}):`)
+    for (const t of resolved) {
+      console.log(`  [done] ${t.description}`)
+      if (t.resolution) console.log(`    Resolution: ${t.resolution}`)
+    }
+    console.log('')
+  }
+
+  store.close()
+}
+
+function findNodeStatement(m: any, nodeId: string): string | null {
+  const decision = m.decisions.get(nodeId)
+  if (decision) return `[decision] ${decision.statement}`
+  const constraint = m.constraints.get(nodeId)
+  if (constraint) return `[constraint] ${constraint.statement}`
+  const exploration = m.explorations.get(nodeId)
+  if (exploration) return `[exploration] ${exploration.topic}`
+  return null
 }
 
 // ── forge test ───────────────────────────────────────────────────────────────

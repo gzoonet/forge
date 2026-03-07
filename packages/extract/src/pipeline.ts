@@ -19,6 +19,7 @@ import type { LLMClient } from './llm-client'
 import { classify } from './classifier'
 import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
+import { checkPropagation, applyPropagationResults } from './constraint-engine'
 
 export class ExtractionPipeline {
   constructor(
@@ -88,6 +89,53 @@ export class ExtractionPipeline {
       if (promoCheck) promotionChecks.push(promoCheck)
     }
 
+    // Stage 3: Constraint propagation check for new decisions
+    let escalationRequired = false
+    let escalationReason: string | undefined
+    let conflictChecksTriggered = false
+
+    const decisionUpdates = modelUpdates.filter(u => u.targetLayer === 'decisions' && u.operation === 'insert')
+    if (decisionUpdates.length > 0) {
+      const currentModel = this.store.getProjectModel(projectId)
+
+      for (const update of decisionUpdates) {
+        const decision = currentModel.decisions.get(update.nodeId)
+        if (!decision) continue
+
+        // Only check propagation for committed decisions
+        if (decision.commitment !== 'decided' && decision.commitment !== 'locked') continue
+
+        try {
+          const propagation = await checkPropagation(decision, currentModel, this.llmClient)
+
+          if (propagation.tensions.length > 0 || propagation.closedOptions.length > 0) {
+            conflictChecksTriggered = true
+            const provenance = createProvenance(turn.sessionId, turn.turnIndex, turn.text, classification.confidence)
+            const result = applyPropagationResults(
+              propagation, decision, currentModel, this.store, provenance,
+              { projectId, sessionId: turn.sessionId, turnIndex: turn.turnIndex }
+            )
+
+            for (const tensionId of result.tensionIds) {
+              modelUpdates.push({
+                operation: 'insert',
+                targetLayer: 'tensions',
+                nodeId: tensionId,
+                changes: { type: 'constraint_propagation' },
+              })
+            }
+
+            if (result.escalation) {
+              escalationRequired = true
+              escalationReason = result.escalation.reason
+            }
+          }
+        } catch (err) {
+          console.warn('[forge-extract] Constraint propagation check failed:', (err as Error).message)
+        }
+      }
+    }
+
     // Check if artifact generation should trigger
     if (modelUpdates.some(u => u.targetLayer === 'decisions')) {
       const currentModel = this.store.getProjectModel(projectId)
@@ -121,11 +169,12 @@ export class ExtractionPipeline {
       classifications: [{ type: classification.primary, confidence: classification.confidence, additionalTypes: classification.additional }],
       modelUpdates,
       promotionChecks,
-      constraintChecksTriggered: modelUpdates.some(u =>
+      constraintChecksTriggered: conflictChecksTriggered || modelUpdates.some(u =>
         u.targetLayer === 'constraints' || u.targetLayer === 'decisions'
       ),
-      conflictChecksTriggered: false,
-      escalationRequired: false,
+      conflictChecksTriggered,
+      escalationRequired,
+      escalationReason,
     }
   }
 
