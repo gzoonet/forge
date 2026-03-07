@@ -1,0 +1,8 @@
+{
+  "name": "@gzoo/forge",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "engines": {
+    "node": ">=20"
+  }
+}

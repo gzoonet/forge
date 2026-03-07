@@ -1,0 +1,20 @@
+{
+  "name": "@gzoo/forge-core",
+  "version": "0.1.0",
+  "description": "Core types and utilities for GZOO Forge",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "nanoid": "^3.3.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "UNLICENSED"
+}
