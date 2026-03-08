@@ -203,9 +203,58 @@ npx tsc -b packages/mcp
 node packages/mcp/dist/index.js
 ```
 
-**Requirements:** Node.js 20+, npm workspaces.
-
 **Stack:** TypeScript (strict), SQLite via better-sqlite3, nanoid@3 (CJS-compatible).
+
+---
+
+## Requirements
+
+| Dependency | Minimum Version | Notes |
+|------------|----------------|-------|
+| Node.js | 20+ | Required for all packages |
+| npm | 9+ | Workspace support required |
+| Claude Code | Latest | For MCP integration |
+| LLM API key | — | Anthropic, OpenAI, or any OpenAI-compatible provider |
+
+The MCP server requires **one** LLM API key to process conversational turns. Without an API key, resources (like `forge://brief`) still work but `forge_process_turn` will fail.
+
+---
+
+## Your Project's .gitignore
+
+When you install Forge in your project, add this to your `.gitignore`:
+
+```gitignore
+# Forge local state (decisions are stored locally, not in version control)
+.forge/
+```
+
+The `.forge/` directory contains `state.json` (session tracking) and `forge.db` (SQLite database with all decisions). This is local per-developer state — it should not be committed.
+
+---
+
+## FAQ
+
+**Do I need to pay for an API key?**
+Yes. Forge uses LLM calls to classify and extract decisions from conversation. Each `forge_process_turn` call makes 1-2 API calls (classifier + extractor). Costs are minimal — a typical session uses a few cents of API credits.
+
+**Can I use a local model (free)?**
+Yes. Set `FORGE_LLM_PROVIDER=openai-compatible` and point `OPENAI_BASE_URL` at your local server (e.g., Ollama at `http://localhost:11434/v1`). Quality depends on the model — larger models extract decisions more reliably.
+
+**Does Forge send my code to an API?**
+No. Forge only sends conversational text (what you say) to the LLM for classification and extraction. Your source code, files, and project contents are never sent. All extracted decisions are stored locally in `.forge/forge.db`.
+
+**Can I use this with Cursor, Windsurf, or other IDEs?**
+Forge uses the MCP (Model Context Protocol) standard. Any IDE or tool that supports MCP stdio servers can use Forge. Claude Code has the most mature MCP support. Check your IDE's documentation for MCP server configuration.
+
+**How do I reset and start fresh?**
+Delete the `.forge/` directory in your project root. Next time Claude Code starts, Forge will prompt for a new `forge_init`.
+
+**Where are my decisions stored?**
+In `.forge/forge.db` (SQLite) in your project directory. The database is event-sourced — decisions are append-only events. You can inspect it with any SQLite viewer.
+
+**Can multiple developers share decisions?**
+Not yet. The `.forge/` directory is local state. Cross-developer synchronization is a potential future feature. For now, each developer has their own decision history.
 
 ---
 

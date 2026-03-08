@@ -4,9 +4,15 @@
 
 This project uses Forge for persistent decision tracking across sessions.
 
+**Setup requirements:**
+- MCP server configured in `.mcp.json` or `~/.claude/settings.json` (see Forge README)
+- An LLM API key (e.g., `ANTHROPIC_API_KEY`) configured in the MCP server's env
+- `.forge/` added to `.gitignore`
+
 **At session start:**
 - Read the `forge://brief` resource to understand what has been decided in previous sessions
 - Use the `forge-workflow` prompt if you need a refresher on how to use Forge tools
+- If `forge://brief` returns "No active Forge project", call `forge_init` with the project name
 
 **During conversation — do this PROACTIVELY and SILENTLY:**
 - Call `forge_process_turn` whenever the user expresses a decision, constraint, rejection, goal, exploration, or correction
@@ -26,3 +32,8 @@ This project uses Forge for persistent decision tracking across sessions.
 - "Hello" / "Thanks" / greetings
 - "Can you explain how X works?" → pure questions
 - "Looks good" → trivial acknowledgments
+
+**Troubleshooting:**
+- If forge tools aren't available, restart Claude Code (MCP servers connect at startup)
+- If `forge_process_turn` fails with LLM errors, check that the API key is set in the MCP config
+- If state seems wrong, delete `.forge/` and call `forge_init` to start fresh

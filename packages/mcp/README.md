@@ -224,6 +224,138 @@ Add `.forge/` to your `.gitignore`. It's local state, not for version control.
 
 ---
 
+## Setup Checklist
+
+Follow these steps to get Forge working in your project:
+
+- [ ] **1. Install** — Add MCP config to `.mcp.json` (see [Install](#install) above)
+- [ ] **2. API Key** — Set `ANTHROPIC_API_KEY` (or another provider) in `.env` or the MCP config's `env` block
+- [ ] **3. .gitignore** — Add `.forge/` to your project's `.gitignore`
+- [ ] **4. CLAUDE.md** — Copy the contents of `CLAUDE.md.forge-snippet` into your project's `CLAUDE.md` (optional but recommended)
+- [ ] **5. Verify** — Start Claude Code and check that forge tools appear (see [Verifying It Works](#verifying-it-works))
+
+---
+
+## Project vs Global Config
+
+You can configure Forge in two places:
+
+| Location | Scope | Best for |
+|----------|-------|----------|
+| `.mcp.json` in project root | This project only | Team projects (commit to repo so everyone gets it) |
+| `~/.claude/settings.json` | All projects | Personal use across all your projects |
+
+**Project-level** (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "forge": {
+      "command": "npx",
+      "args": ["@gzoo/forge-mcp"],
+      "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
+    }
+  }
+}
+```
+
+**Global** (`~/.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "forge": {
+      "command": "npx",
+      "args": ["@gzoo/forge-mcp"],
+      "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
+    }
+  }
+}
+```
+
+If both exist, project-level takes precedence. Note: if you commit `.mcp.json` to your repo, **do not** include API keys — use environment variables or a `.env` file instead.
+
+---
+
+## Verifying It Works
+
+After adding the MCP config, start Claude Code and look for these signs:
+
+1. **Startup log** — In Claude Code's output, you should see the MCP server connect. Check for errors.
+2. **Tools available** — Ask Claude Code: "What forge tools do you have?" It should list `forge_init`, `forge_process_turn`, `forge_approve`, `forge_end_session`, `forge_query_memory`.
+3. **Resources available** — Ask Claude Code to read `forge://brief`. It should return either project state or "No active Forge project".
+4. **Quick test** — Say: "Let's use TypeScript for this project." Claude Code should silently call `forge_process_turn` to record the decision.
+
+---
+
+## Troubleshooting
+
+### Tools don't appear in Claude Code
+
+- **Check `.mcp.json` syntax** — Must be valid JSON. Common mistake: trailing commas.
+- **Restart Claude Code** — MCP servers connect at startup. After changing config, restart Claude Code completely.
+- **Check npx resolves** — Run `npx @gzoo/forge-mcp --help` in your terminal. If it fails, the package isn't installed or your npm registry isn't configured.
+- **Check Node version** — Requires Node 20+. Run `node --version` to verify.
+
+### "No active project" errors
+
+- This is normal on first use. The server waits for `forge_init` to be called.
+- If you had a project before, check that `.forge/state.json` exists in your project root.
+- If `state.json` exists but errors persist, the file may be corrupted — delete `.forge/` and re-init.
+
+### LLM / extraction failures
+
+- **Missing API key** — `forge_process_turn` requires an LLM. Check that `ANTHROPIC_API_KEY` (or your provider's key) is set.
+- **Wrong provider** — If using OpenAI, set `FORGE_LLM_PROVIDER=openai`. Default is `anthropic`.
+- **Rate limits** — If you see rate limit errors, wait a moment and try again. Forge makes 1-2 LLM calls per turn.
+- **Resources still work** — Even without an LLM configured, `forge://brief` and `forge://model` will return data from previously recorded sessions.
+
+### Permission errors on .forge/
+
+- The `.forge/` directory is created in your project root. Ensure your user has write permissions there.
+- If running in a container or CI, mount a writable volume at the project root.
+
+### State seems corrupted
+
+Delete the `.forge/` directory and start fresh:
+
+```bash
+rm -rf .forge/
+# Next Claude Code session will prompt for forge_init
+```
+
+Your decisions will be lost, but you can re-record important ones in a new session.
+
+---
+
+## Upgrading
+
+```bash
+# Clear npx cache and use latest version
+npx @gzoo/forge-mcp@latest
+```
+
+Or update the version in your `.mcp.json`:
+```json
+"args": ["@gzoo/forge-mcp@latest"]
+```
+
+State files (`.forge/forge.db`) are forward-compatible — upgrading the server won't lose your decisions.
+
+---
+
+## Privacy & Data
+
+| Data | Where it goes |
+|------|--------------|
+| Conversation text | Sent to your configured LLM provider (Anthropic, OpenAI, etc.) for classification and extraction |
+| Extracted decisions | Stored locally in `.forge/forge.db` (SQLite) |
+| Project state | Stored locally in `.forge/state.json` |
+| Source code | **Never sent anywhere** — Forge only processes conversation text |
+| Telemetry | **None** — Forge does not phone home, collect analytics, or send data to GZOO servers |
+
+Your decisions stay on your machine. The only external calls are to the LLM provider you configure.
+
+---
+
 ## Development
 
 ```bash
