@@ -6,6 +6,7 @@ import type {
   ProjectModel,
   Decision,
   Tension,
+  Exploration,
   NodeId,
   Provenance,
 } from '@gzoo/forge-core'
@@ -33,6 +34,19 @@ function makeDecision(overrides: Partial<Decision> = {}): Decision {
     enables: [],
     manifestsIn: [],
     closedOptions: [],
+    ...overrides,
+  }
+}
+
+function makeExploration(overrides: Partial<Exploration> = {}): Exploration {
+  return {
+    id: createId('exploration'),
+    topic: 'Test exploration',
+    direction: 'Exploring options',
+    openQuestions: [],
+    consideredOptions: [],
+    provenance: makeProvenance(),
+    status: 'active',
     ...overrides,
   }
 }
@@ -443,6 +457,240 @@ describe('TrustEngine', () => {
       // But flow + low priority = not blocked by flow (only medium is blocked by flow).
       // Low is only blocked by cooldown. No prior surfacing → should pass.
       expect(decision.shouldSurface).toBe(true)
+    })
+
+    // Scenario 7.2: Scope drift detection
+    it('Scenario 7.2: first scope-expanding turn does not trigger drift warning', () => {
+      // Define a model with a clear scope
+      const exploration = makeExploration({
+        topic: 'blockchain distributed ledger consensus mechanism',
+      })
+      const model = makeModel({
+        intent: {
+          primaryGoal: {
+            statement: 'Building a scheduling tool for solo consultants',
+            successCriteria: [],
+            provenance: makeProvenance(),
+            commitment: 'decided',
+          },
+          scope: {
+            inScope: [{
+              description: 'Calendar management and booking for consultants',
+              provenance: makeProvenance(),
+              commitment: 'decided',
+            }],
+            outOfScope: [],
+            unknownScope: [],
+          },
+          qualityBar: null,
+          successMetrics: [],
+          antiGoals: [],
+        },
+        explorations: new Map([[exploration.id, exploration]]),
+      })
+
+      // First drift turn — new exploration with no overlap to scope
+      const result = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration.id,
+          changes: {},
+        }],
+      })
+
+      const surfacings = engine.evaluateSurfacings(1, result, model)
+      const driftSurfacing = surfacings.find(s => s.type === 'scope_drift')
+
+      // First expanding turn should NOT trigger a warning
+      expect(driftSurfacing).toBeUndefined()
+    })
+
+    it('Scenario 7.2: drift warning fires after 2+ scope-expanding turns', () => {
+      const exploration1 = makeExploration({
+        topic: 'blockchain distributed ledger consensus mechanism',
+      })
+      const exploration2 = makeExploration({
+        topic: 'machine learning neural network training pipeline',
+      })
+      const model = makeModel({
+        intent: {
+          primaryGoal: {
+            statement: 'Building a scheduling tool for solo consultants',
+            successCriteria: [],
+            provenance: makeProvenance(),
+            commitment: 'decided',
+          },
+          scope: {
+            inScope: [{
+              description: 'Calendar management and booking for consultants',
+              provenance: makeProvenance(),
+              commitment: 'decided',
+            }],
+            outOfScope: [],
+            unknownScope: [],
+          },
+          qualityBar: null,
+          successMetrics: [],
+          antiGoals: [],
+        },
+        explorations: new Map([
+          [exploration1.id, exploration1],
+          [exploration2.id, exploration2],
+        ]),
+      })
+
+      // First drift turn
+      const result1 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration1.id,
+          changes: {},
+        }],
+      })
+      engine.evaluateSurfacings(1, result1, model)
+
+      // Second drift turn — should fire now
+      const result2 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration2.id,
+          changes: {},
+        }],
+      })
+      const surfacings = engine.evaluateSurfacings(2, result2, model)
+      const driftSurfacing = surfacings.find(s => s.type === 'scope_drift')
+
+      expect(driftSurfacing).toBeDefined()
+      expect(driftSurfacing!.shouldSurface).toBe(true)
+      expect(driftSurfacing!.suggestedMessage).toContain('scheduling tool for solo consultants')
+    })
+
+    it('Scenario 7.2: drift warning message includes defined scope contrast', () => {
+      const exploration1 = makeExploration({
+        topic: 'blockchain distributed ledger consensus mechanism',
+      })
+      const exploration2 = makeExploration({
+        topic: 'virtual reality immersive gaming experience',
+      })
+      const model = makeModel({
+        intent: {
+          primaryGoal: {
+            statement: 'Building an invoicing platform for freelancers',
+            successCriteria: [],
+            provenance: makeProvenance(),
+            commitment: 'decided',
+          },
+          scope: {
+            inScope: [{
+              description: 'Invoice creation and payment tracking for freelancers',
+              provenance: makeProvenance(),
+              commitment: 'decided',
+            }],
+            outOfScope: [],
+            unknownScope: [],
+          },
+          qualityBar: null,
+          successMetrics: [],
+          antiGoals: [],
+        },
+        explorations: new Map([
+          [exploration1.id, exploration1],
+          [exploration2.id, exploration2],
+        ]),
+      })
+
+      // Two drift turns to trigger warning
+      const result1 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration1.id,
+          changes: {},
+        }],
+      })
+      engine.evaluateSurfacings(1, result1, model)
+
+      const result2 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration2.id,
+          changes: {},
+        }],
+      })
+      const surfacings = engine.evaluateSurfacings(2, result2, model)
+      const driftSurfacing = surfacings.find(s => s.type === 'scope_drift')
+
+      expect(driftSurfacing).toBeDefined()
+      expect(driftSurfacing!.suggestedMessage).toContain('invoicing platform for freelancers')
+      expect(driftSurfacing!.suggestedMessage).toContain('expanding scope')
+    })
+
+    it('Scenario 7.2: after confirming expansion, no further warnings for that topic', () => {
+      const exploration1 = makeExploration({
+        topic: 'blockchain distributed ledger consensus mechanism',
+      })
+      const exploration2 = makeExploration({
+        topic: 'machine learning neural network training pipeline',
+      })
+      const model = makeModel({
+        intent: {
+          primaryGoal: {
+            statement: 'Building a scheduling tool for solo consultants',
+            successCriteria: [],
+            provenance: makeProvenance(),
+            commitment: 'decided',
+          },
+          scope: {
+            inScope: [{
+              description: 'Calendar management and booking for consultants',
+              provenance: makeProvenance(),
+              commitment: 'decided',
+            }],
+            outOfScope: [],
+            unknownScope: [],
+          },
+          qualityBar: null,
+          successMetrics: [],
+          antiGoals: [],
+        },
+        explorations: new Map([
+          [exploration1.id, exploration1],
+          [exploration2.id, exploration2],
+        ]),
+      })
+
+      // First drift turn
+      const result1 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration1.id,
+          changes: {},
+        }],
+      })
+      engine.evaluateSurfacings(1, result1, model)
+
+      // User confirms the expansion — resets counter
+      engine.confirmScopeExpansion(exploration1.topic)
+
+      // Second exploration after confirmation — counter restarted, so this is "first" again
+      const result2 = makeResult({
+        modelUpdates: [{
+          operation: 'insert',
+          targetLayer: 'explorations',
+          nodeId: exploration2.id,
+          changes: {},
+        }],
+      })
+      const surfacings = engine.evaluateSurfacings(2, result2, model)
+      const driftSurfacing = surfacings.find(s => s.type === 'scope_drift')
+
+      // Should NOT fire — counter was reset by confirmation
+      expect(driftSurfacing).toBeUndefined()
     })
 
     // Ensure critical items always break through

@@ -325,6 +325,55 @@ describe('LLM-assisted constraint conflict detection', () => {
   })
 })
 
+describe('Scenario 3.1 — Stated vs Revealed Conflict', () => {
+  it('revealed constraint with higher evidence wins over stated constraint', async () => {
+    const model = createEmptyModel()
+
+    // Stated constraint: early, single instance, low recency
+    const stated = createTestConstraint({
+      statement: 'Must be enterprise-grade, built for scale',
+      type: 'operational',
+      isRevealed: false,
+      source: 'stated',
+      originStatementTurn: 2, // Early in conversation
+    })
+
+    // Revealed constraint: multiple evidence, recent
+    const revealed = createTestConstraint({
+      statement: 'Prefers simplicity and solo-maintainable systems',
+      type: 'operational',
+      isRevealed: true,
+      source: 'revealed',
+      originStatementTurn: 15, // Recent
+      revealedEvidence: [
+        'Chose simple option over complex',
+        'Rejected enterprise feature',
+        'Preferred solo-maintainable',
+        'Said "I don\'t want to manage infrastructure"',
+      ],
+    })
+
+    model.constraints.set(stated.id, stated)
+    model.constraints.set(revealed.id, revealed)
+
+    // Score both
+    const statedScore = computeConstraintScore(stated, model, 15, 20)
+    const revealedScore = computeConstraintScore(revealed, model, 15, 20)
+
+    // Revealed should have much higher frequency (4 evidence × 25 = 100)
+    expect(revealedScore.frequency).toBe(100)
+    expect(statedScore.frequency).toBe(15)
+
+    // Revealed should win overall
+    expect(revealedScore.total).toBeGreaterThan(statedScore.total)
+
+    // Conflict detection should find this
+    const conflicts = await detectConstraintConflicts(model, 15, 20)
+    expect(conflicts.length).toBe(1)
+    expect(conflicts[0].winner).toBe('revealed')
+  })
+})
+
 describe('Scenario 3.3 — Low-Stakes Decision (No Escalation)', () => {
   it('should not trigger propagation for brand/aesthetic decisions', async () => {
     // This tests the isLowStakes check — brand decisions with assumed certainty

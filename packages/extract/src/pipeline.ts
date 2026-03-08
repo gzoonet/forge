@@ -13,13 +13,14 @@ import {
   type Exploration,
   type CommitmentLevel,
   type Provenance,
+  type Tension,
 } from '@gzoo/forge-core'
 import { ProjectModelStore } from '@gzoo/forge-store'
 import type { LLMClient } from './llm-client'
 import { classify } from './classifier'
 import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
-import { checkPropagation, applyPropagationResults } from './constraint-engine'
+import { checkPropagation, applyPropagationResults, constraintsMayConflict } from './constraint-engine'
 import { TrustEngine } from './trust-engine'
 import type { SurfacingDecision, MemoryMatch, SessionBrief } from '@gzoo/forge-core'
 import { generateSessionBrief } from './session-brief'
@@ -112,6 +113,15 @@ export class ExtractionPipeline {
       if (promoCheck) promotionChecks.push(promoCheck)
     }
 
+    // Check for exploration resolution (exploring → leaning promotion)
+    const explorationResolutions = this.checkExplorationResolution(
+      modelUpdates, projectId, turn.sessionId, turn.turnIndex, classification.confidence
+    )
+    for (const resolution of explorationResolutions) {
+      modelUpdates.push(resolution.update)
+      promotionChecks.push(resolution.promoCheck)
+    }
+
     // Stage 2.5: Cross-project memory query for new decisions/explorations
     let memoryMatches: MemoryMatch[] = []
     const newDecisions = modelUpdates.filter(u => u.targetLayer === 'decisions' && u.operation === 'insert')
@@ -200,6 +210,19 @@ export class ExtractionPipeline {
         } catch (err) {
           console.warn('[forge-extract] Constraint propagation check failed:', (err as Error).message)
         }
+      }
+    }
+
+    // Detect intra-turn tensions between newly created constraints (and vs existing)
+    const newConstraints = modelUpdates.filter(u => u.targetLayer === 'constraints' && u.operation === 'insert')
+    if (newConstraints.length >= 1) {
+      const currentModel = this.store.getProjectModel(projectId)
+      const intraTurnTensions = this.detectIntraTurnTensions(
+        newConstraints, currentModel, turn.sessionId, turn.turnIndex, classification.confidence
+      )
+      for (const tensionUpdate of intraTurnTensions) {
+        modelUpdates.push(tensionUpdate)
+        conflictChecksTriggered = true
       }
     }
 
@@ -437,11 +460,9 @@ export class ExtractionPipeline {
 
       case 'correction': {
         const { data } = extracted
-        // Find the node being corrected by searching recent model state
-        // For now, emit a CORRECTION_APPLIED event with the changes
-        // The store will apply the correction to the matching node
+        // Find the node being corrected using scored matching
         const model = this.store.getProjectModel(projectId)
-        const targetNodeId = this.findCorrectionTarget(model, data.correcting)
+        const targetNodeId = this.findTargetNode(model, data.correcting, data.targetType)
 
         if (targetNodeId) {
           this.store.appendEvent({
@@ -461,32 +482,199 @@ export class ExtractionPipeline {
 
         return null
       }
+
+      case 'approval': {
+        const { data } = extracted
+        if (!data.targetDescription) return null
+        const model = this.store.getProjectModel(projectId)
+        const targetNodeId = this.findTargetNode(model, data.targetDescription, 'decision')
+
+        if (targetNodeId && data.promotionIntent) {
+          const decision = model.decisions.get(targetNodeId)
+          if (decision && decision.commitment === 'leaning') {
+            // This is the ONE valid path for leaning → decided: explicit user approval
+            this.store.appendEvent({
+              type: 'NODE_PROMOTED',
+              nodeId: targetNodeId,
+              from: 'leaning',
+              to: 'decided',
+              trigger: 'explicit_commitment',
+              wasAutomatic: false,
+              provenance,
+            }, context)
+
+            return {
+              operation: 'promote' as any,
+              targetLayer: 'decisions',
+              nodeId: targetNodeId,
+              changes: { commitment: 'decided', trigger: 'explicit_commitment' },
+            }
+          }
+        }
+
+        // Non-promotion approval — acknowledge but no model change needed
+        if (targetNodeId) {
+          return {
+            operation: 'update',
+            targetLayer: 'decisions',
+            nodeId: targetNodeId,
+            changes: { approved: true },
+          }
+        }
+
+        return null
+      }
+
+      case 'elaboration': {
+        const { data } = extracted
+        if (!data.targetDescription) return null
+        const model = this.store.getProjectModel(projectId)
+        const targetNodeId = this.findTargetNode(model, data.targetDescription)
+
+        if (!targetNodeId) return null
+
+        // Determine which layer the node is in and build changes
+        const changes: Record<string, unknown> = {}
+
+        // Check if it's a decision
+        const decision = model.decisions.get(targetNodeId)
+        if (decision) {
+          if (data.additions.length > 0) {
+            const newRationale = decision.rationale
+              ? `${decision.rationale}; ${data.additions.join('; ')}`
+              : data.additions.join('; ')
+            changes.rationale = newRationale
+          }
+          if (data.modifies) Object.assign(changes, data.modifies)
+
+          this.store.appendEvent({
+            type: 'NODE_UPDATED',
+            nodeId: targetNodeId,
+            nodeType: 'decision',
+            changes,
+            provenance,
+          }, context)
+
+          return {
+            operation: 'update',
+            targetLayer: 'decisions',
+            nodeId: targetNodeId,
+            changes,
+          }
+        }
+
+        // Check if it's an exploration
+        const exploration = model.explorations.get(targetNodeId)
+        if (exploration) {
+          if (data.additions.length > 0) {
+            changes.consideredOptions = [...exploration.consideredOptions, ...data.additions]
+          }
+          if (data.modifies) Object.assign(changes, data.modifies)
+
+          this.store.appendEvent({
+            type: 'NODE_UPDATED',
+            nodeId: targetNodeId,
+            nodeType: 'exploration',
+            changes,
+            provenance,
+          }, context)
+
+          return {
+            operation: 'update',
+            targetLayer: 'explorations',
+            nodeId: targetNodeId,
+            changes,
+          }
+        }
+
+        // Check if it's a constraint
+        const constraint = model.constraints.get(targetNodeId)
+        if (constraint) {
+          if (data.modifies) Object.assign(changes, data.modifies)
+          if (data.additions.length > 0) {
+            changes.statement = `${constraint.statement}; ${data.additions.join('; ')}`
+          }
+
+          this.store.appendEvent({
+            type: 'NODE_UPDATED',
+            nodeId: targetNodeId,
+            nodeType: 'constraint',
+            changes,
+            provenance,
+          }, context)
+
+          return {
+            operation: 'update',
+            targetLayer: 'constraints',
+            nodeId: targetNodeId,
+            changes,
+          }
+        }
+
+        return null
+      }
     }
   }
 
-  private findCorrectionTarget(model: ProjectModel, correcting: string): NodeId | null {
-    const searchText = correcting.toLowerCase()
+  private findTargetNode(
+    model: ProjectModel,
+    searchText: string,
+    preferLayer?: 'decision' | 'constraint' | 'exploration' | null
+  ): NodeId | null {
+    const STOPWORDS = new Set([
+      'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+      'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
+      'on', 'with', 'at', 'by', 'from', 'as', 'into', 'about', 'that',
+      'this', 'it', 'its', 'not', 'but', 'and', 'or', 'if', 'we', 'our',
+      'use', 'using', 'want', 'need', 'said', 'also',
+    ])
 
-    // Search decisions
-    for (const [id, dec] of model.decisions) {
-      if (dec.statement.toLowerCase().includes(searchText) || searchText.includes(dec.statement.toLowerCase())) {
-        return id
-      }
-    }
-    // Search constraints
-    for (const [id, con] of model.constraints) {
-      if (con.statement.toLowerCase().includes(searchText) || searchText.includes(con.statement.toLowerCase())) {
-        return id
-      }
-    }
-    // Search explorations
-    for (const [id, exp] of model.explorations) {
-      if (exp.topic.toLowerCase().includes(searchText) || searchText.includes(exp.topic.toLowerCase())) {
-        return id
-      }
+    const tokenize = (text: string): Set<string> => {
+      const words = text.toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !STOPWORDS.has(w))
+      return new Set(words)
     }
 
-    return null
+    const jaccard = (a: Set<string>, b: Set<string>): number => {
+      if (a.size === 0 || b.size === 0) return 0
+      let intersection = 0
+      for (const w of a) { if (b.has(w)) intersection++ }
+      const union = a.size + b.size - intersection
+      return union > 0 ? intersection / union : 0
+    }
+
+    const searchTokens = tokenize(searchText)
+    if (searchTokens.size === 0) return null
+
+    // Short search text needs higher threshold to avoid false positives
+    const threshold = searchTokens.size <= 2 ? 0.4 : 0.25
+
+    type Candidate = { id: NodeId; score: number; turnIndex: number }
+    const candidates: Candidate[] = []
+
+    const addCandidates = (
+      map: Map<string, { statement?: string; topic?: string; provenance: { turnIndex: number } }>,
+      layer: string
+    ) => {
+      if (preferLayer && layer !== preferLayer) return
+      for (const [id, node] of map) {
+        const text = (node as any).statement ?? (node as any).topic ?? ''
+        const score = jaccard(searchTokens, tokenize(text))
+        if (score >= threshold) {
+          candidates.push({ id, score, turnIndex: node.provenance.turnIndex })
+        }
+      }
+    }
+
+    addCandidates(model.decisions as any, 'decision')
+    addCandidates(model.constraints as any, 'constraint')
+    addCandidates(model.explorations as any, 'exploration')
+
+    if (candidates.length === 0) return null
+
+    // Sort by score desc, then by recency (higher turnIndex) desc
+    candidates.sort((a, b) => b.score - a.score || b.turnIndex - a.turnIndex)
+    return candidates[0].id
   }
 
   private checkPromotionEligibility(
@@ -554,6 +742,202 @@ export class ExtractionPipeline {
     }
 
     return null
+  }
+
+  private detectIntraTurnTensions(
+    newConstraintUpdates: ModelUpdate[],
+    model: ProjectModel,
+    sessionId: string,
+    turnIndex: number,
+    confidence: 'high' | 'medium' | 'low'
+  ): ModelUpdate[] {
+    const results: ModelUpdate[] = []
+    const provenance = createProvenance(sessionId, turnIndex, '', confidence)
+
+    // Get the newly created constraints
+    const newConstraints: Constraint[] = []
+    for (const update of newConstraintUpdates) {
+      const c = model.constraints.get(update.nodeId)
+      if (c) newConstraints.push(c)
+    }
+
+    // Check new constraints against each other
+    for (let i = 0; i < newConstraints.length; i++) {
+      for (let j = i + 1; j < newConstraints.length; j++) {
+        if (constraintsMayConflict(newConstraints[i], newConstraints[j])) {
+          const tensionId = createId('tension')
+          const tension: Tension = {
+            id: tensionId,
+            description: `Potential conflict between "${newConstraints[i].statement}" and "${newConstraints[j].statement}"`,
+            nodeAId: newConstraints[i].id,
+            nodeBId: newConstraints[j].id,
+            nodeAType: 'constraint',
+            nodeBType: 'constraint',
+            severity: 'significant',
+            detectedAt: new Date(),
+            provenance,
+            status: 'active',
+          }
+
+          this.store.appendEvent({
+            type: 'NODE_CREATED',
+            nodeType: 'tension',
+            node: tension,
+            provenance,
+          }, { projectId: model.id, sessionId, turnIndex })
+
+          results.push({
+            operation: 'insert',
+            targetLayer: 'tensions',
+            nodeId: tensionId,
+            changes: { type: 'intra_turn_conflict' },
+          })
+        }
+      }
+    }
+
+    // Check new constraints against existing constraints
+    const existingConstraints = Array.from(model.constraints.values()).filter(
+      c => !newConstraintUpdates.some(u => u.nodeId === c.id)
+    )
+    for (const newC of newConstraints) {
+      for (const existC of existingConstraints) {
+        if (constraintsMayConflict(newC, existC)) {
+          const tensionId = createId('tension')
+          const tension: Tension = {
+            id: tensionId,
+            description: `New constraint "${newC.statement}" may conflict with existing "${existC.statement}"`,
+            nodeAId: newC.id,
+            nodeBId: existC.id,
+            nodeAType: 'constraint',
+            nodeBType: 'constraint',
+            severity: 'significant',
+            detectedAt: new Date(),
+            provenance,
+            status: 'active',
+          }
+
+          this.store.appendEvent({
+            type: 'NODE_CREATED',
+            nodeType: 'tension',
+            node: tension,
+            provenance,
+          }, { projectId: model.id, sessionId, turnIndex })
+
+          results.push({
+            operation: 'insert',
+            targetLayer: 'tensions',
+            nodeId: tensionId,
+            changes: { type: 'intra_turn_conflict' },
+          })
+        }
+      }
+    }
+
+    return results
+  }
+
+  private checkExplorationResolution(
+    modelUpdates: ModelUpdate[],
+    projectId: NodeId,
+    sessionId: string,
+    turnIndex: number,
+    confidence: 'high' | 'medium' | 'low'
+  ): Array<{ update: ModelUpdate; promoCheck: PromotionCheck }> {
+    const results: Array<{ update: ModelUpdate; promoCheck: PromotionCheck }> = []
+    const model = this.store.getProjectModel(projectId)
+
+    // Check 1: Did a rejection eliminate an option from an active exploration?
+    const newRejections = modelUpdates.filter(u => u.targetLayer === 'rejections' && u.operation === 'insert')
+    if (newRejections.length === 0) return results
+
+    for (const [expId, exploration] of model.explorations) {
+      if (exploration.status !== 'active') continue
+      if (exploration.consideredOptions.length < 2) continue
+
+      // Check if the rejection matches any considered option
+      for (const rejUpdate of newRejections) {
+        const rejection = model.rejections.get(rejUpdate.nodeId)
+        if (!rejection) continue
+
+        const rejLower = rejection.statement.toLowerCase()
+        const matchingOption = exploration.consideredOptions.find(opt =>
+          rejLower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(rejection.statement.toLowerCase().slice(0, 20))
+        )
+
+        if (!matchingOption) continue
+
+        // Remove the rejected option
+        const remainingOptions = exploration.consideredOptions.filter(opt => opt !== matchingOption)
+
+        if (remainingOptions.length === 1) {
+          // Only one option survives — auto-create a leaning decision
+          const survivingOption = remainingOptions[0]
+          const decId = createId('decision')
+          const provenance = createProvenance(sessionId, turnIndex, '', confidence)
+
+          const decision: Decision = {
+            id: decId,
+            category: (rejection.category as any) ?? 'technical',
+            statement: survivingOption,
+            rationale: `Remaining option after rejecting "${matchingOption}"`,
+            alternatives: [],
+            commitment: 'leaning',
+            certainty: 'uncertain',
+            provenance,
+            promotionHistory: [{
+              from: 'exploring' as CommitmentLevel,
+              to: 'leaning' as CommitmentLevel,
+              trigger: 'comparative_preference' as any,
+              wasAutomatic: true,
+              sessionId,
+              turnIndex,
+              promotedAt: new Date(),
+            }],
+            constrains: [],
+            dependsOn: [],
+            enables: [],
+            manifestsIn: [],
+            closedOptions: [],
+          }
+
+          this.store.appendEvent({
+            type: 'NODE_CREATED',
+            nodeType: 'decision',
+            node: decision,
+            provenance,
+          }, { projectId, sessionId, turnIndex })
+
+          // Resolve the exploration
+          this.store.appendEvent({
+            type: 'NODE_UPDATED',
+            nodeId: expId,
+            nodeType: 'exploration',
+            changes: { status: 'resolved' },
+            provenance,
+          }, { projectId, sessionId, turnIndex })
+
+          results.push({
+            update: {
+              operation: 'insert',
+              targetLayer: 'decisions',
+              nodeId: decId,
+              changes: { statement: survivingOption, commitment: 'leaning' },
+            },
+            promoCheck: {
+              nodeId: decId,
+              currentCommitment: 'exploring' as CommitmentLevel,
+              candidatePromotion: 'leaning' as CommitmentLevel,
+              trigger: 'comparative_preference',
+              isAutomatic: true,
+              requiresUserAction: false,
+            },
+          })
+        }
+      }
+    }
+
+    return results
   }
 }
 

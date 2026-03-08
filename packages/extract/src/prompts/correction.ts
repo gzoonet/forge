@@ -11,6 +11,10 @@ Respond ONLY with valid JSON. No explanation. No markdown fences.
   "correcting": "<what is being corrected — quote or describe the original>",
   "correction": "<the correct version>",
   "isPermanent": true | false,
-  "reason": "<why the correction is being made, if stated>"
+  "reason": "<why the correction is being made, if stated>",
+  "targetType": "decision" | "constraint" | "exploration" | null
 }
+
+For targetType: infer what kind of node is being corrected. Use "decision" for choices/commitments,
+"constraint" for requirements/limitations, "exploration" for open topics. Use null if unclear.
 `

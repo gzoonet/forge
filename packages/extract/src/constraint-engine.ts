@@ -139,7 +139,7 @@ export async function detectConstraintConflicts(
   return conflicts
 }
 
-function constraintsMayConflict(a: Constraint, b: Constraint): boolean {
+export function constraintsMayConflict(a: Constraint, b: Constraint): boolean {
   // Same type of constraint with different orientations suggests conflict
   if (a.type === b.type) return true
   // Check for keyword overlap that might indicate the same topic

@@ -30,6 +30,7 @@ import {
 } from '@gzoo/forge-core'
 import type { ForgeEvent, StoredEvent, StoredTurn } from './events'
 import { runMigrations } from './migrations'
+import { expandWithSynonyms } from './synonyms'
 
 export class ProjectModelStore {
   private db: Database.Database
@@ -536,13 +537,27 @@ export class ProjectModelStore {
   }
 
   private computeRelevance(query: string, target: string): number {
-    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 3)
-    const targetWords = target.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    const targetWords = target.toLowerCase().split(/\s+/).filter(w => w.length > 2)
     if (queryWords.length === 0 || targetWords.length === 0) return 0
 
-    const overlap = queryWords.filter(w => targetWords.includes(w))
-    const overlapRatio = overlap.length / Math.max(queryWords.length, 1)
-    return Math.min(100, Math.round(overlapRatio * 100) + (overlap.length * 10))
+    // Expand both sides with domain synonyms
+    const expandedQuery = expandWithSynonyms(queryWords)
+    const expandedTarget = expandWithSynonyms(targetWords)
+
+    // Direct word overlap
+    const directOverlap = queryWords.filter(w => targetWords.includes(w))
+
+    // Synonym-expanded overlap (query words matching expanded target, and vice versa)
+    const synonymOverlap = queryWords.filter(w =>
+      !directOverlap.includes(w) && expandedTarget.includes(w)
+    ).length + targetWords.filter(w =>
+      !directOverlap.includes(w) && expandedQuery.includes(w)
+    ).length
+
+    const effectiveOverlap = directOverlap.length + (synonymOverlap * 0.6)
+    const overlapRatio = effectiveOverlap / Math.max(queryWords.length, 1)
+    return Math.min(100, Math.round(overlapRatio * 100) + (directOverlap.length * 10) + (synonymOverlap * 5))
   }
 
   // ── Internal ───────────────────────────────────────────────────────────────

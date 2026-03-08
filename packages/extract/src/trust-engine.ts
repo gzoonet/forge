@@ -24,6 +24,8 @@ export class TrustEngine {
   private flowState: FlowState
   private budget: InterruptionBudget
   private suppressedCount = 0
+  private scopeDriftTurnCount = 0
+  private scopeDriftConfirmedTopics: Set<string> = new Set()
 
   constructor(
     private store: ProjectModelStore,
@@ -334,6 +336,11 @@ export class TrustEngine {
     return count
   }
 
+  confirmScopeExpansion(topic: string): void {
+    this.scopeDriftConfirmedTopics.add(topic.toLowerCase())
+    this.scopeDriftTurnCount = 0
+  }
+
   private detectScopeDrift(
     result: ExtractionResult,
     model: ProjectModel
@@ -343,27 +350,57 @@ export class TrustEngine {
     if (model.intent.scope.inScope.length === 0 && model.intent.scope.outOfScope.length === 0) return null
 
     // Look for new explorations or decisions that might be out of scope
-    const newExplorations = result.modelUpdates
-      .filter(u => u.targetLayer === 'explorations' && u.operation === 'insert')
+    const newItems = result.modelUpdates
+      .filter(u => (u.targetLayer === 'explorations' || u.targetLayer === 'decisions') && u.operation === 'insert')
 
-    if (newExplorations.length === 0) return null
+    if (newItems.length === 0) return null
 
-    // Simple heuristic: if we have out-of-scope items defined and a new exploration
-    // touches similar keywords, flag it
+    // Check 1: Overlap with explicit outOfScope items
     const outOfScopeKeywords = model.intent.scope.outOfScope
       .flatMap(s => s.description.toLowerCase().split(/\s+/).filter(w => w.length > 4))
 
-    for (const update of newExplorations) {
-      const exploration = model.explorations.get(update.nodeId)
-      if (!exploration) continue
+    // Check 2: Low overlap with inScope items (drift into genuinely new territory)
+    const inScopeKeywords = model.intent.scope.inScope
+      .flatMap(s => s.description.toLowerCase().split(/\s+/).filter(w => w.length > 4))
+    const goalKeywords = model.intent.primaryGoal.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
+    const allScopeKeywords = [...new Set([...inScopeKeywords, ...goalKeywords])]
 
-      const explorationWords = exploration.topic.toLowerCase().split(/\s+/).filter(w => w.length > 4)
-      const overlap = explorationWords.filter(w => outOfScopeKeywords.includes(w))
+    for (const update of newItems) {
+      const node = model.explorations.get(update.nodeId) ?? model.decisions.get(update.nodeId)
+      if (!node) continue
+      const nodeText = (node as any).topic ?? (node as any).statement ?? ''
+      const nodeWords = nodeText.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4)
 
-      if (overlap.length >= 2) {
-        return {
-          nodeIds: [update.nodeId],
-          message: `"${exploration.topic}" touches areas you marked as out of scope. Are we expanding scope, or is this a later idea to hold separately?`,
+      // Skip if this topic was already confirmed as in-scope
+      if (this.scopeDriftConfirmedTopics.has(nodeText.toLowerCase())) continue
+
+      let isDrift = false
+
+      // Check against outOfScope (explicit)
+      const outOfScopeOverlap = nodeWords.filter((w: string) => outOfScopeKeywords.includes(w))
+      if (outOfScopeOverlap.length >= 2) {
+        isDrift = true
+      }
+
+      // Check against inScope + goal (implicit — low overlap means potential drift)
+      if (!isDrift && allScopeKeywords.length > 0 && nodeWords.length > 0) {
+        const inScopeOverlap = nodeWords.filter((w: string) => allScopeKeywords.includes(w))
+        const overlapRatio = inScopeOverlap.length / nodeWords.length
+        if (overlapRatio < 0.15 && nodeWords.length >= 3) {
+          isDrift = true
+        }
+      }
+
+      if (isDrift) {
+        this.scopeDriftTurnCount++
+
+        // Only flag after 2+ scope-expanding turns (per behavioral contract 7.2)
+        if (this.scopeDriftTurnCount >= 2) {
+          const scopeDesc = model.intent.primaryGoal.statement
+          return {
+            nodeIds: [update.nodeId],
+            message: `These topics are a meaningful expansion from the defined scope ("${scopeDesc}"). Are we expanding scope, or is this a v2 idea to hold separately?`,
+          }
         }
       }
     }

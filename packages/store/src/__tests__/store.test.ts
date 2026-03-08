@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { ProjectModelStore } from '../store'
 import { createProvenance, createId } from '@gzoo/forge-core'
-import type { Decision, Constraint, Exploration } from '@gzoo/forge-core'
+import type { Decision, Constraint, Exploration, Artifact, ArtifactSection } from '@gzoo/forge-core'
 import {
   getDecisionsByCommitment,
   getActiveExplorations,
@@ -326,6 +326,86 @@ describe('ProjectModelStore — query helpers', () => {
     const deps = getDependentsOf(model, parentId)
     expect(deps).toHaveLength(1)
     expect(deps[0].statement).toBe('Use Prisma ORM')
+  })
+})
+
+// ─── Scenario 6.2: Section-Level Artifact Approval ──────────────────────────
+
+describe('Scenario 6.2 — Artifact section status updates', () => {
+  it('updates individual section status without affecting other sections', () => {
+    const projectId = store.createProject('ws_test', 'Test')
+    const sessionId = store.startSession(projectId)
+    const provenance = createProvenance(sessionId, 1, 'artifact')
+
+    const rootSectionId = createId('artifact') as string
+    const section2Id = createId('artifact') as string
+
+    const artifact: Artifact = {
+      id: createId('artifact'),
+      type: 'spec',
+      name: 'Architecture Spec',
+      description: 'Technical architecture document',
+      status: 'draft',
+      provenance,
+      sourceDecisionIds: [],
+      sourceConstraintIds: [],
+      sections: new Map([
+        [rootSectionId, {
+          id: rootSectionId,
+          artifactId: '',
+          title: 'Overview',
+          content: { format: 'markdown', body: '# Overview' },
+          status: 'draft',
+          version: 1,
+          childSectionIds: [section2Id],
+          sourceDecisionIds: [],
+          sourceConstraintIds: [],
+          provenance,
+        } as ArtifactSection],
+        [section2Id, {
+          id: section2Id,
+          artifactId: '',
+          parentSectionId: rootSectionId,
+          title: 'Database Design',
+          content: { format: 'markdown', body: '## Database' },
+          status: 'draft',
+          version: 1,
+          childSectionIds: [],
+          sourceDecisionIds: [],
+          sourceConstraintIds: [],
+          provenance,
+        } as ArtifactSection],
+      ]),
+      rootSectionId,
+      version: '1',
+      fullyCommitted: false,
+    }
+
+    store.appendEvent(
+      { type: 'NODE_CREATED', nodeType: 'artifact', node: artifact, provenance },
+      { projectId, sessionId, turnIndex: 1 }
+    )
+
+    // Approve root section, reject section 2
+    store.appendEvent(
+      {
+        type: 'NODE_UPDATED',
+        nodeId: artifact.id,
+        nodeType: 'artifact',
+        changes: {
+          [`sections.${rootSectionId}.status`]: 'approved',
+          [`sections.${section2Id}.status`]: 'rejected',
+        },
+        provenance: createProvenance(sessionId, 2, 'review'),
+      },
+      { projectId, sessionId, turnIndex: 2 }
+    )
+
+    const model = store.getProjectModel(projectId)
+    const art = model.artifacts.get(artifact.id)
+    expect(art).toBeDefined()
+    // The artifact should exist and not be fully committed
+    expect(art!.fullyCommitted).toBe(false)
   })
 })
 

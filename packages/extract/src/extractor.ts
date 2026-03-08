@@ -6,6 +6,8 @@ import { REJECTION_EXTRACT_SYSTEM_PROMPT } from './prompts/rejection'
 import { EXPLORATION_EXTRACT_SYSTEM_PROMPT } from './prompts/exploration'
 import { CORRECTION_EXTRACT_SYSTEM_PROMPT } from './prompts/correction'
 import { GOAL_EXTRACT_SYSTEM_PROMPT } from './prompts/goal'
+import { APPROVAL_EXTRACT_SYSTEM_PROMPT } from './prompts/approval'
+import { ELABORATION_EXTRACT_SYSTEM_PROMPT } from './prompts/elaboration'
 
 export type ExtractedDecision = {
   statement: string
@@ -46,12 +48,26 @@ export type ExtractedCorrection = {
   correction: string
   isPermanent: boolean
   reason: string | null
+  targetType: 'decision' | 'constraint' | 'exploration' | null
 }
 
 export type ExtractedGoal = {
   statement: string
   successCriteria: string[]
   commitment: 'exploring' | 'leaning' | 'decided'
+}
+
+export type ExtractedApproval = {
+  targetDescription: string
+  scope: 'full' | 'partial'
+  promotionIntent: boolean
+  comment: string | null
+}
+
+export type ExtractedElaboration = {
+  targetDescription: string
+  additions: string[]
+  modifies: Record<string, string> | null
 }
 
 export type ExtractedNode =
@@ -61,6 +77,8 @@ export type ExtractedNode =
   | { turnType: 'exploration'; data: ExtractedExploration }
   | { turnType: 'correction'; data: ExtractedCorrection }
   | { turnType: 'goal_statement'; data: ExtractedGoal }
+  | { turnType: 'approval'; data: ExtractedApproval }
+  | { turnType: 'elaboration'; data: ExtractedElaboration }
 
 const SYSTEM_PROMPTS: Partial<Record<TurnType, string>> = {
   decision: DECISION_EXTRACT_SYSTEM_PROMPT,
@@ -69,12 +87,14 @@ const SYSTEM_PROMPTS: Partial<Record<TurnType, string>> = {
   exploration: EXPLORATION_EXTRACT_SYSTEM_PROMPT,
   correction: CORRECTION_EXTRACT_SYSTEM_PROMPT,
   goal_statement: GOAL_EXTRACT_SYSTEM_PROMPT,
+  approval: APPROVAL_EXTRACT_SYSTEM_PROMPT,
+  elaboration: ELABORATION_EXTRACT_SYSTEM_PROMPT,
 }
 
 // Turn types that produce extractable nodes
 const EXTRACTABLE_TYPES: TurnType[] = [
   'decision', 'constraint_stated', 'rejection',
-  'exploration', 'correction', 'goal_statement',
+  'exploration', 'correction', 'goal_statement', 'approval', 'elaboration',
 ]
 
 export function isExtractable(turnType: TurnType): boolean {

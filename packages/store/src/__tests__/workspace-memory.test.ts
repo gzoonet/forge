@@ -200,6 +200,89 @@ describe('Cross-project memory queries', () => {
   })
 })
 
+// ── Memory Relevance (Synonym Expansion) ────────────────────────────────────
+
+describe('Memory relevance with synonym expansion', () => {
+  function addDecisionToProject(projectId: string, sessionId: string, statement: string, opts?: {
+    category?: string
+  }) {
+    const provenance = createProvenance(sessionId, 1, statement)
+    const decId = createId('decision')
+    const decision: Decision = {
+      id: decId,
+      category: (opts?.category ?? 'technical') as Decision['category'],
+      statement,
+      rationale: 'Test rationale',
+      alternatives: [],
+      commitment: 'decided',
+      certainty: 'evidenced',
+      provenance,
+      promotionHistory: [],
+      constrains: [],
+      dependsOn: [],
+      enables: [],
+      manifestsIn: [],
+      closedOptions: [],
+    }
+    store.appendEvent(
+      { type: 'NODE_CREATED', nodeType: 'decision', node: decision, provenance },
+      { projectId, sessionId, turnIndex: 1 }
+    )
+    return decId
+  }
+
+  it('synonym expansion: "frontend" query matches "ui framework" target', () => {
+    const wsId = store.createWorkspace('SynTest')
+    const p1 = store.createProject(wsId, 'Old Project')
+    const s1 = store.startSession(p1)
+    addDecisionToProject(p1, s1, 'Use Vue as the ui framework')
+
+    const p2 = store.createProject(wsId, 'New Project')
+    const result = store.queryMemory({
+      currentDecision: 'Which frontend framework should we use?',
+      excludeProjectId: p2,
+    })
+
+    // "frontend" and "ui" are synonyms, "framework" is a direct match
+    const vueMatch = result.matches.find(m => m.statement.includes('Vue'))
+    expect(vueMatch).toBeDefined()
+    expect(vueMatch!.relevanceScore).toBeGreaterThanOrEqual(30)
+  })
+
+  it('short words like "api" are no longer filtered out', () => {
+    const wsId = store.createWorkspace('ShortWords')
+    const p1 = store.createProject(wsId, 'API Project')
+    const s1 = store.startSession(p1)
+    addDecisionToProject(p1, s1, 'Build a REST api for the backend')
+
+    const p2 = store.createProject(wsId, 'Query Project')
+    const result = store.queryMemory({
+      currentDecision: 'api design for our backend service',
+      excludeProjectId: p2,
+    })
+
+    // "api" (3 chars) should now be included and match
+    const apiMatch = result.matches.find(m => m.statement.includes('api'))
+    expect(apiMatch).toBeDefined()
+  })
+
+  it('unrelated queries still return no matches', () => {
+    const wsId = store.createWorkspace('NoFalsePositives')
+    const p1 = store.createProject(wsId, 'Color Project')
+    const s1 = store.startSession(p1)
+    addDecisionToProject(p1, s1, 'Use blue as the primary brand color')
+
+    const p2 = store.createProject(wsId, 'Infra Project')
+    const result = store.queryMemory({
+      currentDecision: 'kubernetes container orchestration strategy',
+      excludeProjectId: p2,
+    })
+
+    // Completely unrelated topics should still not match
+    expect(result.matches.length).toBe(0)
+  })
+})
+
 // ── Values Model ────────────────────────────────────────────────────────────
 
 describe('Values model building', () => {
