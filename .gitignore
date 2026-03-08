@@ -6,5 +6,6 @@ dist/
 !.env.example
 .forge/
 .mcp.json
+public/
 continuity-engine-plan.md
 forge-master-state.md
