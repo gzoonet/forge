@@ -18,7 +18,7 @@ export function registerResources(mcp: McpServer, forge: ForgeServer): void {
     'session-brief',
     'forge://brief',
     {
-      description: 'Session brief — project decisions, constraints, tensions, and goals. Read this at session start to understand the current project state.',
+      description: 'IMPORTANT: Read this at the start of every session. Contains all project decisions, constraints, tensions, and goals from previous sessions. This is your project memory — it tells you what has already been decided so you do not contradict or re-ask resolved questions.',
       mimeType: 'text/markdown',
     },
     () => {

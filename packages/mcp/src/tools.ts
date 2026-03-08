@@ -21,7 +21,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_init',
     {
       title: 'Initialize Forge Project',
-      description: 'Initialize a new Forge project to track decisions, constraints, and explorations across sessions. Call once at the start of a new project.',
+      description: 'Initialize a new Forge project to track decisions, constraints, and explorations across sessions. Only call this if no project exists yet — the server auto-resumes existing projects on startup. After calling this, use forge_process_turn to record significant conversational turns throughout the session.',
       inputSchema: {
         projectName: z.string().describe('Name of the project'),
       },
@@ -68,7 +68,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_process_turn',
     {
       title: 'Record Conversational Turn',
-      description: 'Record a significant conversational turn. Call when the user expresses a decision, states a constraint, rejects an approach, explores options, sets a goal, corrects a previous understanding, or approves a proposal. Do NOT call for trivial messages, greetings, or questions that don\'t change the project model.',
+      description: 'PROACTIVELY call this tool during conversation to record significant turns. You should call this WITHOUT being asked whenever the user: expresses a decision ("let\'s use React"), states a constraint ("must ship by March"), rejects an approach ("no PHP"), explores options ("maybe we could try..."), sets a goal ("we\'re building a dashboard"), corrects you ("no, I said Postgres not MySQL"), or explicitly commits ("yes, let\'s go with that"). Do NOT call for trivial messages, greetings, or questions. Pass the user\'s actual words as the text parameter. Do this silently — do not tell the user you are recording.',
       inputSchema: {
         text: z.string().describe('The conversational turn text to process'),
         speaker: z.enum(['user', 'system']).default('user').describe('Who said this — user or system/assistant'),
@@ -184,7 +184,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_approve',
     {
       title: 'Approve Decision',
-      description: 'Promote a leaning decision to decided. This is the ONLY way decisions move from leaning to decided — it is never automatic. Provide a hint to identify which leaning decision to approve.',
+      description: 'Promote a leaning decision to decided. This is the ONLY way decisions move from leaning to decided — it is never automatic. Call this when the user explicitly commits to something they were previously just leaning toward (e.g. "yes, let\'s go with Stripe" or "I\'ve decided on PostgreSQL"). Provide a phrase from the decision as the hint.',
       inputSchema: {
         decisionHint: z.string().describe('A phrase identifying the leaning decision to approve (fuzzy matched)'),
       },
@@ -277,7 +277,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_query_memory',
     {
       title: 'Query Cross-Project Memory',
-      description: 'Search for relevant decisions, rejections, and explorations from other projects in the workspace. Useful when making a new decision to check what was done before.',
+      description: 'Search for relevant decisions, rejections, and explorations from other projects in the workspace. Call this proactively when the user is making a decision that might have been made before in another project — e.g. choosing a database, auth approach, or deployment strategy.',
       inputSchema: {
         query: z.string().describe('What to search for — describe the decision or topic'),
       },

@@ -1,0 +1,28 @@
+# Forge Integration (add to your project's CLAUDE.md)
+
+## Project Memory (Forge)
+
+This project uses Forge for persistent decision tracking across sessions.
+
+**At session start:**
+- Read the `forge://brief` resource to understand what has been decided in previous sessions
+- Use the `forge-workflow` prompt if you need a refresher on how to use Forge tools
+
+**During conversation — do this PROACTIVELY and SILENTLY:**
+- Call `forge_process_turn` whenever the user expresses a decision, constraint, rejection, goal, exploration, or correction
+- Call `forge_approve` when the user explicitly commits to a leaning decision
+- Call `forge_query_memory` when the user is making a decision that might overlap with other projects
+- Do NOT mention Forge to the user unless they ask about it
+
+**What to record (examples):**
+- "Let's use React and TypeScript" → decision
+- "Budget must stay under $5k/month" → constraint
+- "No, we tried that and it didn't work" → rejection
+- "Maybe we could use Supabase?" → exploration
+- "The goal is to ship an MVP by April" → goal
+- "I said Postgres, not MySQL" → correction
+
+**What NOT to record:**
+- "Hello" / "Thanks" / greetings
+- "Can you explain how X works?" → pure questions
+- "Looks good" → trivial acknowledgments

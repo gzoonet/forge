@@ -6,6 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ForgeServer } from './server'
 import { registerResources } from './resources'
 import { registerTools } from './tools'
+import { registerPrompts } from './prompts'
 
 const forge = new ForgeServer()
 
@@ -17,9 +18,10 @@ const mcp = new McpServer({
   version: '0.1.0',
 })
 
-// Register all resources and tools
+// Register all resources, tools, and prompts
 registerResources(mcp, forge)
 registerTools(mcp, forge)
+registerPrompts(mcp, forge)
 
 // Graceful shutdown
 function shutdown() {
