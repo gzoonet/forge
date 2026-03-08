@@ -12,6 +12,18 @@
     "build": "tsc",
     "test": "vitest run"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gzoonet/forge.git",
+    "directory": "packages/mcp"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["mcp", "claude-code", "forge", "project-intelligence", "decision-tracking"],
   "dependencies": {
     "@gzoo/forge-core": "0.1.0",
     "@gzoo/forge-store": "0.1.0",
@@ -23,5 +35,5 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }

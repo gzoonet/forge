@@ -9,6 +9,17 @@
     "build": "tsc",
     "test": "vitest run"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gzoonet/forge.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "nanoid": "^3.3.7"
   },
@@ -16,5 +27,5 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }
