@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vitest run packages/extract/src/__tests__/pipeline.test.ts)",
+      "Bash(npx vitest run)",
+      "Read(//home/ubuntu/.claude/**)",
+      "Read(//home/ubuntu/**)",
+      "Bash(npm publish --access public)",
+      "Bash(git commit:*)",
+      "Bash(git push origin main)",
+      "Bash(npx tsc -b packages/mcp)",
+      "Bash(npx vitest run packages/mcp)",
+      "Bash(git add packages/mcp/src/tools.ts packages/mcp/src/resources.ts packages/mcp/src/prompts.ts packages/mcp/src/index.ts packages/mcp/tsconfig.tsbuildinfo CLAUDE.md.forge-snippet)",
+      "Bash(npm link)",
+      "Bash(forge --help)",
+      "Bash(forge)",
+      "Bash(git add README.md packages/mcp/README.md CLAUDE.md.forge-snippet CONTRIBUTING.md)",
+      "Bash(git add .claude/settings.json)"
+    ]
+  }
+}
