@@ -1,5 +1,5 @@
 import { ProjectModelStore } from '@gzoo/forge-store'
-import { ExtractionPipeline, TrustEngine, createLLMClient, resolveProviderConfig } from '@gzoo/forge-extract'
+import { ExtractionPipeline, TrustEngine, createLLMClient, resolveProviderConfig, generateSessionBrief } from '@gzoo/forge-extract'
 import type { LLMClient } from '@gzoo/forge-extract'
 import type {
   ConversationalTurn,
@@ -97,6 +97,10 @@ export async function turn(text: string): Promise<void> {
     }
   } else {
     console.log('  No model updates (no-op turn)')
+  }
+
+  if (result.extractionFailures && result.extractionFailures > 0) {
+    console.log(`  ⚠ ${result.extractionFailures} extraction${result.extractionFailures > 1 ? 's' : ''} failed (check logs)`)
   }
 
   if (result.promotionChecks.length > 0) {
@@ -312,54 +316,53 @@ export function brief(): void {
   const store = getStore(state)
   const m = store.getProjectModel(state!.projectId)
 
+  const sb = generateSessionBrief(m, store, state!.sessionId)
+
   console.log(`\n═══ Session Brief ═══\n`)
+  console.log(`Goal: ${sb.primaryGoal}`)
 
-  // Primary goal
-  if (m.intent.primaryGoal) {
-    console.log(`Goal: ${m.intent.primaryGoal.statement}`)
-  } else {
-    console.log('Goal: Not yet defined')
+  if (sb.lockedDecisions.length > 0) {
+    console.log(`\nLocked (${sb.lockedDecisions.length}):`)
+    for (const d of sb.lockedDecisions) console.log(`  🔒 ${d.statement}`)
   }
 
-  // Decision summary by commitment
-  const locked = getDecisionsByCommitment(m, 'locked')
-  const decided = getDecisionsByCommitment(m, 'decided')
-  const leaning = getDecisionsByCommitment(m, 'leaning')
-
-  if (locked.length > 0) {
-    console.log(`\nLocked (${locked.length}):`)
-    for (const d of locked) console.log(`  🔒 ${d.statement}`)
+  if (sb.decidedDecisions.length > 0) {
+    console.log(`\nDecided (${sb.decidedDecisions.length}):`)
+    for (const d of sb.decidedDecisions) console.log(`  ✓ ${d.statement}`)
   }
 
-  if (decided.length > 0) {
-    console.log(`\nDecided (${decided.length}):`)
-    for (const d of decided) console.log(`  ✓ ${d.statement}`)
-  }
-
-  if (leaning.length > 0) {
-    console.log(`\nLeaning (${leaning.length}):`)
-    for (const d of leaning) console.log(`  → ${d.statement}`)
-  }
-
-  // Active explorations
-  const activeExp = getActiveExplorations(m)
-  if (activeExp.length > 0) {
-    console.log(`\nOpen explorations (${activeExp.length}):`)
-    for (const e of activeExp) {
-      console.log(`  ? ${e.topic}`)
+  if (sb.pendingDecisions.length > 0) {
+    console.log(`\nPending (${sb.pendingDecisions.length}):`)
+    for (const p of sb.pendingDecisions) {
+      console.log(`  ? ${p.topic}`)
+      for (const q of p.openQuestions) {
+        console.log(`    • ${q}`)
+      }
     }
   }
 
-  // Unresolved tensions
-  const tensions = getUnresolvedTensions(m)
-  if (tensions.length > 0) {
-    console.log(`\nUnresolved tensions (${tensions.length}):`)
-    for (const t of tensions) {
+  if (sb.unresolvedTensions.length > 0) {
+    console.log(`\nUnresolved tensions (${sb.unresolvedTensions.length}):`)
+    for (const t of sb.unresolvedTensions) {
       console.log(`  ⚠ ${t.description} [${t.severity}]`)
     }
   }
 
-  // Constraints
+  if (sb.artifactsInProgress.length > 0) {
+    console.log(`\nArtifacts in progress (${sb.artifactsInProgress.length}):`)
+    for (const a of sb.artifactsInProgress) {
+      console.log(`  [${a.status}] ${a.name} (${a.sectionsCommitted}/${a.sectionsInProgress + a.sectionsCommitted} sections)`)
+    }
+  }
+
+  if (sb.changesSinceLastSession.length > 0) {
+    console.log(`\nChanges since last session:`)
+    for (const c of sb.changesSinceLastSession) {
+      console.log(`  • ${c}`)
+    }
+  }
+
+  // Constraints (still show these from model directly)
   if (m.constraints.size > 0) {
     console.log(`\nConstraints (${m.constraints.size}):`)
     for (const [, c] of m.constraints) {
@@ -376,6 +379,7 @@ export function brief(): void {
   }
 
   console.log(`\nSession turns: ${state!.turnIndex}`)
+  console.log(`Outcome: ${sb.lastSessionOutcome}`)
   console.log('')
   store.close()
 }

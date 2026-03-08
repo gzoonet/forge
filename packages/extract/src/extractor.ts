@@ -107,6 +107,23 @@ export async function extract(
 
     return { turnType, data } as ExtractedNode
   } catch {
-    return null
+    // First attempt failed — retry with explicit JSON instruction
+    console.warn(`[forge-extract] JSON parse failed for ${turnType} extraction, retrying. Raw: ${response.text.slice(0, 200)}`)
+
+    try {
+      const retryResponse = await llmClient.complete({
+        system: systemPrompt,
+        prompt: `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON. Respond with ONLY the JSON object, no markdown fences, no explanation.`,
+        model: 'sonnet',
+        maxTokens: 500,
+      })
+
+      const retryCleaned = retryResponse.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+      const retryData = JSON.parse(retryCleaned)
+      return { turnType, data: retryData } as ExtractedNode
+    } catch {
+      console.warn(`[forge-extract] Extraction retry also failed for ${turnType}. Input lost.`)
+      return null
+    }
   }
 }

@@ -410,6 +410,7 @@ export type ExtractionResult = {
   escalationReason?: string
   surfacingDecisions?: SurfacingDecision[]
   memoryMatches?: MemoryMatch[]
+  extractionFailures?: number
 }
 
 // ─── Session Brief ───────────────────────────────────────────────────────────

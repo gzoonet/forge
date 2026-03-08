@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   computeConstraintScore,
   detectConstraintConflicts,
+  checkConstraintConflictLLM,
 } from '../constraint-engine'
+import type { LLMClient } from '../llm-client'
 import {
   createId,
   createProvenance,
@@ -143,7 +145,7 @@ describe('Constraint Scoring', () => {
 })
 
 describe('Constraint Conflict Detection', () => {
-  it('detects conflict between stated and revealed constraints of the same type', () => {
+  it('detects conflict between stated and revealed constraints of the same type', async () => {
     const model = createEmptyModel()
 
     const stated = createTestConstraint({
@@ -167,14 +169,14 @@ describe('Constraint Conflict Detection', () => {
     model.constraints.set(stated.id, stated)
     model.constraints.set(revealed.id, revealed)
 
-    const conflicts = detectConstraintConflicts(model, 15, 20)
+    const conflicts = await detectConstraintConflicts(model, 15, 20)
 
     expect(conflicts.length).toBe(1)
     expect(conflicts[0].statedConstraintId).toBe(stated.id)
     expect(conflicts[0].revealedConstraintId).toBe(revealed.id)
   })
 
-  it('marks conflicts as unresolved when scores are close (delta < 15)', () => {
+  it('marks conflicts as unresolved when scores are close (delta < 15)', async () => {
     const model = createEmptyModel()
 
     // Create constraints that will have similar scores
@@ -196,7 +198,7 @@ describe('Constraint Conflict Detection', () => {
     model.constraints.set(stated.id, stated)
     model.constraints.set(revealed.id, revealed)
 
-    const conflicts = detectConstraintConflicts(model, 10, 10)
+    const conflicts = await detectConstraintConflicts(model, 10, 10)
 
     expect(conflicts.length).toBe(1)
     // With close scores, should be unresolved
@@ -204,7 +206,7 @@ describe('Constraint Conflict Detection', () => {
     expect(['unresolved', 'stated', 'revealed']).toContain(conflict.winner)
   })
 
-  it('does not detect conflicts when no revealed constraints exist', () => {
+  it('does not detect conflicts when no revealed constraints exist', async () => {
     const model = createEmptyModel()
 
     const stated1 = createTestConstraint({ statement: 'Must use Node.js', type: 'technical' })
@@ -213,11 +215,11 @@ describe('Constraint Conflict Detection', () => {
     model.constraints.set(stated1.id, stated1)
     model.constraints.set(stated2.id, stated2)
 
-    const conflicts = detectConstraintConflicts(model, 5, 10)
+    const conflicts = await detectConstraintConflicts(model, 5, 10)
     expect(conflicts.length).toBe(0)
   })
 
-  it('skips constraints that already have a conflict ID', () => {
+  it('skips constraints that already have a conflict ID', async () => {
     const model = createEmptyModel()
 
     const stated = createTestConstraint({
@@ -234,8 +236,92 @@ describe('Constraint Conflict Detection', () => {
     model.constraints.set(stated.id, stated)
     model.constraints.set(revealed.id, revealed)
 
-    const conflicts = detectConstraintConflicts(model, 5, 10)
+    const conflicts = await detectConstraintConflicts(model, 5, 10)
     expect(conflicts.length).toBe(0)
+  })
+})
+
+describe('LLM-assisted constraint conflict detection', () => {
+  function mockLLM(response: string): LLMClient {
+    return {
+      complete: vi.fn(async () => ({ text: response })),
+    }
+  }
+
+  it('confirms semantic conflict via LLM', async () => {
+    const a = createTestConstraint({
+      statement: 'Application must work offline-first with local storage',
+      type: 'technical',
+    })
+    const b = createTestConstraint({
+      statement: 'Real-time collaboration and live syncing across all devices',
+      type: 'technical',
+    })
+
+    const llm = mockLLM('{"isConflicting": true, "description": "Offline-first conflicts with real-time sync", "severity": "significant"}')
+    const result = await checkConstraintConflictLLM(a, b, llm)
+
+    expect(result).toBe(true)
+    expect(llm.complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects false positive via LLM', async () => {
+    const a = createTestConstraint({
+      statement: 'Must use TypeScript for all backend code',
+      type: 'technical',
+    })
+    const b = createTestConstraint({
+      statement: 'Frontend should use TypeScript with React',
+      type: 'technical',
+    })
+
+    const llm = mockLLM('{"isConflicting": false, "description": "", "severity": "informational"}')
+    const result = await checkConstraintConflictLLM(a, b, llm)
+
+    expect(result).toBe(false)
+  })
+
+  it('falls back to heuristic (true) on LLM failure', async () => {
+    const a = createTestConstraint({ statement: 'Must be fast' })
+    const b = createTestConstraint({ statement: 'Must be thorough' })
+
+    const llm: LLMClient = {
+      complete: vi.fn(async () => { throw new Error('API down') }),
+    }
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await checkConstraintConflictLLM(a, b, llm)
+
+    expect(result).toBe(true) // Falls back to assuming conflict
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('falling back to heuristic'))
+
+    warnSpy.mockRestore()
+  })
+
+  it('uses LLM to filter in detectConstraintConflicts when provided', async () => {
+    const model = createEmptyModel()
+
+    const stated = createTestConstraint({
+      statement: 'Must support offline mode',
+      type: 'technical',
+      isRevealed: false,
+    })
+    const revealed = createTestConstraint({
+      statement: 'Prefers cloud-only architecture',
+      type: 'technical',
+      isRevealed: true,
+      source: 'revealed',
+    })
+
+    model.constraints.set(stated.id, stated)
+    model.constraints.set(revealed.id, revealed)
+
+    // LLM says no conflict — should filter it out
+    const llm = mockLLM('{"isConflicting": false, "description": "", "severity": "informational"}')
+    const conflicts = await detectConstraintConflicts(model, 5, 10, llm)
+
+    expect(conflicts.length).toBe(0)
+    expect(llm.complete).toHaveBeenCalled()
   })
 })
 

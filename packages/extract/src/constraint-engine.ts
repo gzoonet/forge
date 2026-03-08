@@ -17,6 +17,7 @@ import {
 import { ProjectModelStore } from '@gzoo/forge-store'
 import type { LLMClient } from './llm-client'
 import { CONSTRAINT_PROPAGATION_SYSTEM_PROMPT } from './prompts/propagation'
+import { CONSTRAINT_CONFLICT_SYSTEM_PROMPT } from './prompts/conflict'
 
 // ── Constraint Scoring ───────────────────────────────────────────────────────
 
@@ -92,11 +93,12 @@ function isContradictory(a: string, b: string): boolean {
 
 // ── Constraint Conflict Detection ────────────────────────────────────────────
 
-export function detectConstraintConflicts(
+export async function detectConstraintConflicts(
   model: ProjectModel,
   currentTurnIndex: number,
-  totalTurns: number
-): ConstraintConflict[] {
+  totalTurns: number,
+  llmClient?: LLMClient
+): Promise<ConstraintConflict[]> {
   const statedConstraints = Array.from(model.constraints.values()).filter(c => !c.isRevealed)
   const revealedConstraints = Array.from(model.constraints.values()).filter(c => c.isRevealed)
   const conflicts: ConstraintConflict[] = []
@@ -104,7 +106,15 @@ export function detectConstraintConflicts(
   for (const stated of statedConstraints) {
     for (const revealed of revealedConstraints) {
       if (stated.conflictId || revealed.conflictId) continue
+
+      // Fast pre-filter: skip pairs that obviously don't interact
       if (!constraintsMayConflict(stated, revealed)) continue
+
+      // LLM-assisted semantic check: confirm the conflict is real
+      if (llmClient) {
+        const isReal = await checkConstraintConflictLLM(stated, revealed, llmClient)
+        if (!isReal) continue
+      }
 
       const statedScore = computeConstraintScore(stated, model, currentTurnIndex, totalTurns)
       const revealedScore = computeConstraintScore(revealed, model, currentTurnIndex, totalTurns)
@@ -137,6 +147,33 @@ function constraintsMayConflict(a: Constraint, b: Constraint): boolean {
   const bWords = b.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
   const overlap = aWords.filter(w => bWords.includes(w))
   return overlap.length >= 2
+}
+
+// ── LLM-Assisted Conflict Verification ──────────────────────────────────────
+
+export async function checkConstraintConflictLLM(
+  a: Constraint,
+  b: Constraint,
+  llmClient: LLMClient
+): Promise<boolean> {
+  const prompt = `Constraint A: "${a.statement}" [${a.type}, ${a.hardness}]\nConstraint B: "${b.statement}" [${b.type}, ${b.hardness}]\n\nDo these two constraints conflict?`
+
+  try {
+    const response = await llmClient.complete({
+      system: CONSTRAINT_CONFLICT_SYSTEM_PROMPT,
+      prompt,
+      model: 'haiku',
+      maxTokens: 300,
+    })
+
+    const cleaned = response.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+    const parsed = JSON.parse(cleaned)
+    return parsed.isConflicting === true
+  } catch {
+    // On LLM failure, fall back to heuristic (assume conflict if pre-filter passed)
+    console.warn('[forge-extract] Constraint conflict LLM check failed, falling back to heuristic')
+    return true
+  }
 }
 
 // ── Constraint Propagation (LLM-assisted) ────────────────────────────────────
@@ -176,7 +213,8 @@ export async function checkPropagation(
     })
 
     return parsePropagationResponse(response.text, model)
-  } catch {
+  } catch (err) {
+    console.warn('[forge-extract] Constraint propagation check failed:', (err as Error).message)
     return { tensions: [], closedOptions: [], shouldEscalate: false }
   }
 }

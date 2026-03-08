@@ -50,6 +50,7 @@ function parseClassificationResponse(text: string): ClassificationResult {
     }
   } catch {
     // If parsing fails entirely, default to exploration with low confidence
+    console.warn(`[forge-extract] Classification JSON parse failed, defaulting to exploration. Raw: ${text.slice(0, 200)}`)
     return { primary: 'exploration', confidence: 'low' }
   }
 }

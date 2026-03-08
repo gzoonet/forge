@@ -21,7 +21,8 @@ import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
 import { checkPropagation, applyPropagationResults } from './constraint-engine'
 import { TrustEngine } from './trust-engine'
-import type { SurfacingDecision, MemoryMatch } from '@gzoo/forge-core'
+import type { SurfacingDecision, MemoryMatch, SessionBrief } from '@gzoo/forge-core'
+import { generateSessionBrief } from './session-brief'
 
 export class ExtractionPipeline {
   private trustEngine: TrustEngine | null = null
@@ -38,6 +39,11 @@ export class ExtractionPipeline {
 
   getTrustEngine(): TrustEngine | null {
     return this.trustEngine
+  }
+
+  generateBrief(projectId: NodeId, sessionId: string, previousSessionId?: string): SessionBrief {
+    const model = this.store.getProjectModel(projectId)
+    return generateSessionBrief(model, this.store, sessionId, previousSessionId)
   }
 
   async processTurn(
@@ -80,12 +86,16 @@ export class ExtractionPipeline {
     // Stage 2: Extract per classification type
     const modelUpdates: ModelUpdate[] = []
     const promotionChecks: PromotionCheck[] = []
+    let extractionFailures = 0
 
     for (const turnType of allTypes) {
       if (!isExtractable(turnType)) continue
 
       const extracted = await extract(turnType, turn.text, recentContext, this.llmClient)
-      if (!extracted) continue
+      if (!extracted) {
+        extractionFailures++
+        continue
+      }
 
       const provenance = createProvenance(
         turn.sessionId,
@@ -233,6 +243,7 @@ export class ExtractionPipeline {
       escalationRequired,
       escalationReason,
       memoryMatches: memoryMatches.length > 0 ? memoryMatches : undefined,
+      extractionFailures: extractionFailures > 0 ? extractionFailures : undefined,
     }
 
     // Stage 4: Trust calibration — decide what to surface
