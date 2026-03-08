@@ -260,9 +260,6 @@ Not yet. The `.forge/` directory is local state. Cross-developer synchronization
 
 ## Design Documents
 
-These internal documents detail the architecture and behavioral contracts:
-
-- [forge-master-state.md](forge-master-state.md) — Living project state, phase map, locked decisions
 - [forge-project-model-v2.md](forge-project-model-v2.md) — Complete TypeScript schema with design principles
 - [forge-behavioral-contract.md](forge-behavioral-contract.md) — 18 test scenarios across 7 boundaries
 - [forge-phase1-implementation.md](forge-phase1-implementation.md) — Phase 1 build specification

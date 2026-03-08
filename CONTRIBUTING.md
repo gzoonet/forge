@@ -105,7 +105,6 @@ These are enforced by tests and must never be broken:
 
 Major design decisions are documented in:
 
-- [forge-master-state.md](forge-master-state.md) — Living project state and phase history
 - [forge-project-model-v2.md](forge-project-model-v2.md) — Complete TypeScript schema
 - [forge-behavioral-contract.md](forge-behavioral-contract.md) — 18 test scenarios
 
