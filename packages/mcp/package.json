@@ -1,0 +1,27 @@
+{
+  "name": "@gzoo/forge-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for GZOO Forge — persistent project intelligence for Claude Code",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "forge-mcp": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gzoo/forge-core": "0.1.0",
+    "@gzoo/forge-store": "0.1.0",
+    "@gzoo/forge-extract": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "UNLICENSED"
+}
