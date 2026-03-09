@@ -232,6 +232,7 @@ export class ForgeServer {
   getProjectId(): string | null { return this.projectId }
   getSessionId(): string | null { return this.sessionId }
   getTurnIndex(): number { return this.turnIndex }
+  getStore(): ProjectModelStore | null { return this.store }
 
   /**
    * Graceful shutdown.

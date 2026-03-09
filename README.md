@@ -182,7 +182,7 @@ A decision moves from leaning to decided only through explicit user commitment. 
 | MCP | MCP server for Claude Code | Complete |
 | Cortex | Cortex Bridge for codebase-aware decisions | Complete |
 
-**Test count:** 170 tests across 14 test files.
+**Test count:** 176 tests across 14 test files.
 
 ---
 

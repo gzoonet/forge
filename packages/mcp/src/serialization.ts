@@ -1,4 +1,5 @@
-import type { ProjectModel, SessionBrief } from '@gzoo/forge-core'
+import type { ProjectModel, SessionBrief, ExtractionResult } from '@gzoo/forge-core'
+import type { StoredEvent, StoredTurn } from '@gzoo/forge-store'
 
 /**
  * Serialize a ProjectModel to a plain JSON-safe object.
@@ -143,4 +144,127 @@ function findStatement(model: ProjectModel, nodeId: string): string | null {
   const exploration = model.explorations.get(nodeId)
   if (exploration) return exploration.topic
   return null
+}
+
+/**
+ * Format a turn diff as markdown showing what changed.
+ */
+export function formatDiffAsMarkdown(
+  turn: StoredTurn,
+  events: StoredEvent[],
+  model: ProjectModel
+): string {
+  const lines: string[] = []
+
+  lines.push(`# Turn ${turn.turnIndex} Diff`)
+  lines.push('')
+
+  // Classification
+  if (turn.classification && turn.classification.length > 0) {
+    const primary = turn.classification[0]
+    lines.push(`**Classification:** ${primary.type} (${primary.confidence} confidence)`)
+    if (turn.classification.length > 1) {
+      const others = turn.classification.slice(1).map(c => c.type).join(', ')
+      lines.push(`**Also:** ${others}`)
+    }
+    lines.push('')
+  }
+
+  // What the user said
+  lines.push(`## Input`)
+  lines.push(`> ${turn.text}`)
+  lines.push('')
+
+  // Filter to meaningful events (skip session lifecycle)
+  const meaningful = events.filter(e =>
+    e.type !== 'SESSION_STARTED' && e.type !== 'SESSION_ENDED'
+  )
+
+  if (meaningful.length === 0) {
+    lines.push('*No model changes this turn.*')
+    return lines.join('\n')
+  }
+
+  // Group by type
+  lines.push(`## Changes (${meaningful.length})`)
+  lines.push('')
+
+  for (const event of meaningful) {
+    switch (event.type) {
+      case 'NODE_CREATED': {
+        const nodeType = event.nodeType
+        const node = event.node as Record<string, unknown>
+        const label = (node.statement as string) || (node.topic as string) || (node.name as string) || String(node.id)
+        lines.push(`- **+** [${nodeType}] ${label}`)
+        if (node.commitment) lines.push(`  - Commitment: ${node.commitment}`)
+        if (node.category) lines.push(`  - Category: ${node.category}`)
+        if (node.rationale) lines.push(`  - Rationale: ${node.rationale}`)
+        break
+      }
+      case 'NODE_UPDATED': {
+        const stmt = findStatement(model, event.nodeId) || event.nodeId
+        const fields = Object.keys(event.changes).join(', ')
+        lines.push(`- **~** [${event.nodeType}] ${stmt}`)
+        lines.push(`  - Changed: ${fields}`)
+        break
+      }
+      case 'NODE_PROMOTED': {
+        const stmt = findStatement(model, event.nodeId) || event.nodeId
+        const auto = event.wasAutomatic ? ' (auto)' : ''
+        lines.push(`- **^** ${stmt}: ${event.from} → ${event.to}${auto}`)
+        break
+      }
+      case 'NODE_REJECTED': {
+        lines.push(`- **x** [${event.nodeType}] ${event.nodeId}: ${event.reason}`)
+        break
+      }
+      case 'INTENT_UPDATED': {
+        lines.push(`- **~** [intent.${event.field}] updated`)
+        break
+      }
+      case 'TENSION_DETECTED': {
+        const t = event.tension
+        lines.push(`- **!** Tension: ${t.description} [${t.severity}]`)
+        break
+      }
+      case 'TENSION_RESOLVED': {
+        lines.push(`- **✓** Tension resolved: ${event.resolution}`)
+        break
+      }
+      case 'ESCALATION_TRIGGERED': {
+        lines.push(`- **⚠** Escalation: ${event.escalation.reason}`)
+        break
+      }
+      case 'CORRECTION_APPLIED': {
+        const stmt = findStatement(model, event.targetNodeId) || event.targetNodeId
+        lines.push(`- **↺** Correction to: ${stmt}`)
+        break
+      }
+    }
+  }
+
+  // Extraction metadata
+  const result = turn.extractionResult
+  if (result) {
+    const extras: string[] = []
+    if (result.constraintChecksTriggered) extras.push('constraint propagation ran')
+    if (result.conflictChecksTriggered) extras.push('conflict detection ran')
+    if (result.escalationRequired) extras.push(`escalation: ${result.escalationReason}`)
+    if (result.memoryMatches && result.memoryMatches.length > 0) {
+      extras.push(`${result.memoryMatches.length} memory match${result.memoryMatches.length > 1 ? 'es' : ''}`)
+    }
+    if (result.cortexMatches && result.cortexMatches.length > 0) {
+      extras.push(`${result.cortexMatches.length} Cortex match${result.cortexMatches.length > 1 ? 'es' : ''}`)
+    }
+
+    if (extras.length > 0) {
+      lines.push('')
+      lines.push(`## Pipeline`)
+      for (const e of extras) {
+        lines.push(`- ${e}`)
+      }
+    }
+  }
+
+  return lines.join('\n')
 }
