@@ -302,6 +302,20 @@ Each tool works independently. Cortex works without Forge, Forge works without C
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)
+
+---
+
+## About
+
+Built by [GZOO](https://gzoo.ai) — an AI-powered business automation platform.
+
+Forge started as an internal tool to preserve project decisions across sessions. We open-sourced it because every AI-assisted project loses context — decisions get forgotten, constraints get violated, rejected ideas resurface. We think this approach — structured extraction + event sourcing + persistent memory — is the right way to solve it.
