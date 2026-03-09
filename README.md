@@ -300,14 +300,6 @@ Each tool works independently. Cortex works without Forge, Forge works without C
 
 ---
 
-## Design Documents
-
-- [forge-project-model-v2.md](forge-project-model-v2.md) — Complete TypeScript schema with design principles
-- [forge-behavioral-contract.md](forge-behavioral-contract.md) — 18 test scenarios across 7 boundaries
-- [forge-phase1-implementation.md](forge-phase1-implementation.md) — Phase 1 build specification
-
----
-
 ## License
 
 MIT
