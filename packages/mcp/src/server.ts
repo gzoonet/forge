@@ -266,6 +266,8 @@ export class ForgeServer {
     if (this.llmClient) {
       this.pipeline = new ExtractionPipeline(this.store, this.llmClient)
       this.pipeline.initTrust(this.projectId! as NodeId, this.sessionId!)
+      // Attempt Cortex connection (non-blocking, fails silently)
+      this.pipeline.initCortex().catch(() => {})
     }
   }
 

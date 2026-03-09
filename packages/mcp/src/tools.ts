@@ -140,6 +140,17 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
           }
         }
 
+        // Cortex codebase matches
+        if (result.cortexMatches && result.cortexMatches.length > 0) {
+          parts.push('')
+          parts.push(`Codebase context (${result.cortexMatches.length} match${result.cortexMatches.length > 1 ? 'es' : ''} from Cortex):`)
+          for (const match of result.cortexMatches.slice(0, 3)) {
+            const fileInfo = match.filePath ? ` (${match.filePath})` : ''
+            parts.push(`  [${match.entityType.toUpperCase()}] ${match.name}${fileInfo}`)
+            if (match.description) parts.push(`    ${match.description}`)
+          }
+        }
+
         // Trust-calibrated surfacings
         if (result.surfacingDecisions && result.surfacingDecisions.length > 0) {
           const surfaced = result.surfacingDecisions.filter(s => s.shouldSurface)

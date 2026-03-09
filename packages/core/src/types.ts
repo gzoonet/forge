@@ -410,6 +410,7 @@ export type ExtractionResult = {
   escalationReason?: string
   surfacingDecisions?: SurfacingDecision[]
   memoryMatches?: MemoryMatch[]
+  cortexMatches?: CortexMatch[]
   extractionFailures?: number
 }
 
@@ -611,4 +612,15 @@ export type MemoryResult = {
   matches: MemoryMatch[]
   queryTime: number                    // ms
   source: 'local' | 'cortex'          // Where the memory came from
+}
+
+// ─── Cortex Bridge ──────────────────────────────────────────────────────────
+
+export type CortexMatch = {
+  entityType: string                   // 'pattern' | 'component' | 'dependency' | 'decision' | 'constraint'
+  name: string
+  description: string
+  filePath?: string
+  confidence: number                   // 0-1
+  relationships?: string[]
 }

@@ -22,16 +22,40 @@ import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
 import { checkPropagation, applyPropagationResults, constraintsMayConflict } from './constraint-engine'
 import { TrustEngine } from './trust-engine'
-import type { SurfacingDecision, MemoryMatch, SessionBrief } from '@gzoo/forge-core'
+import type { SurfacingDecision, MemoryMatch, CortexMatch, SessionBrief } from '@gzoo/forge-core'
 import { generateSessionBrief } from './session-brief'
+import { CortexBridge } from './cortex-bridge'
 
 export class ExtractionPipeline {
   private trustEngine: TrustEngine | null = null
+  private cortexBridge: CortexBridge | null = null
 
   constructor(
     private store: ProjectModelStore,
     private llmClient: LLMClient
   ) {}
+
+  /**
+   * Attempt to connect to Cortex. If Cortex is not installed, this is a no-op.
+   * Call once during pipeline setup.
+   */
+  async initCortex(): Promise<boolean> {
+    if (!CortexBridge.isAvailable()) {
+      console.error('[forge-extract] Cortex not found — running without codebase integration')
+      return false
+    }
+    this.cortexBridge = new CortexBridge()
+    const connected = await this.cortexBridge.connect()
+    if (!connected) {
+      this.cortexBridge = null
+      console.error('[forge-extract] Cortex found but connection failed — running without codebase integration')
+    }
+    return connected
+  }
+
+  getCortexBridge(): CortexBridge | null {
+    return this.cortexBridge
+  }
 
   initTrust(projectId: NodeId, sessionId: string): TrustEngine {
     this.trustEngine = new TrustEngine(this.store, projectId, sessionId)
@@ -166,6 +190,42 @@ export class ExtractionPipeline {
       }
     }
 
+    // Stage 2.5b: Cortex codebase query for new decisions/explorations
+    let cortexMatches: CortexMatch[] = []
+    if (this.cortexBridge?.isConnected() && (newDecisions.length > 0 || newExplorations.length > 0)) {
+      try {
+        const currentModel = this.store.getProjectModel(projectId)
+        const cortexQueries: Promise<CortexMatch[]>[] = []
+
+        for (const update of newDecisions) {
+          const decision = currentModel.decisions.get(update.nodeId)
+          if (decision) {
+            cortexQueries.push(this.cortexBridge.query(decision.statement))
+          }
+        }
+
+        for (const update of newExplorations) {
+          const exploration = currentModel.explorations.get(update.nodeId)
+          if (exploration) {
+            cortexQueries.push(this.cortexBridge.query(exploration.topic))
+          }
+        }
+
+        const results = await Promise.all(cortexQueries)
+        const allCortex = results.flat()
+
+        // Deduplicate by name
+        const seen = new Set<string>()
+        cortexMatches = allCortex.filter(m => {
+          if (seen.has(m.name)) return false
+          seen.add(m.name)
+          return true
+        }).slice(0, 5)
+      } catch {
+        // Cortex query failure should not break the pipeline
+      }
+    }
+
     // Stage 3: Constraint propagation check for new decisions
     let escalationRequired = false
     let escalationReason: string | undefined
@@ -266,6 +326,7 @@ export class ExtractionPipeline {
       escalationRequired,
       escalationReason,
       memoryMatches: memoryMatches.length > 0 ? memoryMatches : undefined,
+      cortexMatches: cortexMatches.length > 0 ? cortexMatches : undefined,
       extractionFailures: extractionFailures > 0 ? extractionFailures : undefined,
     }
 
