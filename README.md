@@ -1,5 +1,7 @@
 # GZOO Forge
 
+![GZOO Forge](gzoo-forge.png)
+
 Persistent project intelligence that converts conversation into structured decisions, constraints, and artifacts.
 
 > conversation → structured meaning → decision → artifact → system change
