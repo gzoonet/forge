@@ -1,6 +1,6 @@
 {
   "name": "@gzoo/forge-store",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Event sourcing store for GZOO Forge",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,7 +21,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@gzoo/forge-core": "0.1.0",
+    "@gzoo/forge-core": "0.2.0",
     "better-sqlite3": "^11.0.0",
     "nanoid": "^3.3.7"
   },
