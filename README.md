@@ -85,7 +85,7 @@ Monorepo with npm workspaces. 6 packages:
 packages/
   core/       Types, IDs, provenance — zero dependencies
   store/      Event sourcing + SQLite (better-sqlite3)
-  extract/    Two-stage LLM pipeline (classify → extract)
+  extract/    Two-stage LLM pipeline (classify → extract) + Cortex bridge
   execute/    Execution hooks (GitHub integration)
   cli/        CLI test surface (forge command)
   mcp/        MCP server for Claude Code integration
@@ -178,8 +178,9 @@ A decision moves from leaning to decided only through explicit user commitment. 
 | 5 | Trust calibration engine | Complete |
 | 6 | Cross-project memory + workspace intelligence | Complete |
 | MCP | MCP server for Claude Code | Complete |
+| Cortex | Cortex Bridge for codebase-aware decisions | Complete |
 
-**Test count:** 151 tests across 13 test files.
+**Test count:** 170 tests across 14 test files.
 
 ---
 
@@ -215,6 +216,7 @@ node packages/mcp/dist/index.js
 | npm | 9+ | Workspace support required |
 | Claude Code | Latest | For MCP integration |
 | LLM API key | — | Anthropic, OpenAI, or any OpenAI-compatible provider |
+| Cortex | Latest | Optional — enables codebase-aware decisions |
 
 The MCP server requires **one** LLM API key to process conversational turns. Without an API key, resources (like `forge://brief`) still work but `forge_process_turn` will fail.
 
@@ -255,6 +257,46 @@ In `.forge/forge.db` (SQLite) in your project directory. The database is event-s
 
 **Can multiple developers share decisions?**
 Not yet. The `.forge/` directory is local state. Cross-developer synchronization is a potential future feature. For now, each developer has their own decision history.
+
+---
+
+## Cortex Integration
+
+Forge integrates with [GZOO Cortex](https://github.com/gzoonet/cortex) to enrich decisions with codebase context. The two tools are complementary:
+
+- **Forge** knows *why* — decisions, constraints, intent, rejections
+- **Cortex** knows *what* — code entities, patterns, dependencies, architecture
+
+When both are installed, Forge automatically queries Cortex's knowledge graph during decision extraction. If a developer says "Let's switch to PostgreSQL," Forge checks Cortex for existing database references, related services, and migration patterns — giving decisions real codebase awareness.
+
+### How it works
+
+1. On startup, Forge checks if `cortex` CLI is available
+2. If found, it spawns `cortex mcp start` and connects via MCP (stdio JSON-RPC)
+3. When new decisions or explorations are extracted, Forge queries Cortex in parallel with its own cross-project memory
+4. Cortex matches appear in the extraction output alongside decisions
+
+### Setup
+
+Install both tools as MCP servers in your project:
+
+```json
+{
+  "mcpServers": {
+    "forge": {
+      "command": "npx",
+      "args": ["@gzoo/forge-mcp"],
+      "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
+    },
+    "cortex": {
+      "command": "npx",
+      "args": ["@gzoo/cortex-mcp"]
+    }
+  }
+}
+```
+
+Each tool works independently. Cortex works without Forge, Forge works without Cortex. When both are present, Forge queries Cortex automatically — no additional configuration needed.
 
 ---
 
