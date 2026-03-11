@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { formatBriefAsMarkdown, formatDiffAsMarkdown, serializeModel, serializeTensions } from '../serialization'
-import type { SessionBrief, ProjectModel } from '@gzoo/forge-core'
+import type { SessionBrief, ProjectModel, TurnType } from '@gzoo/forge-core'
 import type { StoredEvent, StoredTurn } from '@gzoo/forge-store'
 
 describe('formatBriefAsMarkdown', () => {
@@ -112,11 +112,11 @@ describe('formatDiffAsMarkdown', () => {
     const turn: StoredTurn = {
       turnId: 't1', sessionId: 's1', projectId: 'p1' as any,
       turnIndex: 1, speaker: 'user', text: 'Hello world',
-      timestamp: new Date(), classification: [{ type: 'noise', confidence: 'high' }],
+      timestamp: new Date(), classification: [{ type: 'elaboration' as TurnType, confidence: 'high' }],
     }
     const md = formatDiffAsMarkdown(turn, [], baseModel)
     expect(md).toContain('# Turn 1 Diff')
-    expect(md).toContain('noise')
+    expect(md).toContain('elaboration')
     expect(md).toContain('Hello world')
     expect(md).toContain('No model changes this turn')
   })
@@ -216,7 +216,7 @@ describe('formatDiffAsMarkdown', () => {
     }
     const events: StoredEvent[] = [{
       type: 'SESSION_STARTED', sessionId: 's1', projectId: 'p1' as any,
-      eventId: 'e0', sessionId: 's1', turnIndex: 0, storedAt: new Date(),
+      eventId: 'e0', turnIndex: 0, storedAt: new Date(),
     } as any]
 
     const md = formatDiffAsMarkdown(turn, events, baseModel)
