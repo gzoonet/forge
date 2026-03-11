@@ -1,0 +1,16 @@
+{
+  "description": "Forge Auto-Capture — automatically captures decisions, constraints, and rejections from user messages",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.mjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

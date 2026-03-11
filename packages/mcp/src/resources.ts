@@ -19,7 +19,7 @@ export function registerResources(mcp: McpServer, forge: ForgeServer): void {
     'session-brief',
     'forge://brief',
     {
-      description: 'IMPORTANT: Read this at the start of every session. Contains all project decisions, constraints, tensions, and goals from previous sessions. This is your project memory — it tells you what has already been decided so you do not contradict or re-ask resolved questions.',
+      description: 'IMPORTANT: Read this at the START of every session. This is your cross-session memory — it contains every decision, constraint, rejection, and open question from ALL previous sessions. Plan mode resets each session; this does not. Reading this prevents you from re-asking resolved questions or contradicting past decisions.',
       mimeType: 'text/markdown',
     },
     () => {

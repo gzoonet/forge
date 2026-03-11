@@ -21,7 +21,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_init',
     {
       title: 'Initialize Forge Project',
-      description: 'Initialize a new Forge project to track decisions, constraints, and explorations across sessions. Only call this if no project exists yet — the server auto-resumes existing projects on startup. After calling this, use forge_process_turn to record significant conversational turns throughout the session.',
+      description: 'Initialize Forge persistent memory for this project. Unlike Plan mode (which resets each session), Forge remembers decisions, constraints, and rejections across EVERY session — when you return tomorrow, it tells you exactly what was decided. Only call this if no project exists yet — the server auto-resumes existing projects on startup.',
       inputSchema: {
         projectName: z.string().describe('Name of the project'),
       },
@@ -68,7 +68,9 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_process_turn',
     {
       title: 'Record Conversational Turn',
-      description: 'PROACTIVELY call this tool during conversation to record significant turns. You should call this WITHOUT being asked whenever the user: expresses a decision ("let\'s use React"), states a constraint ("must ship by March"), rejects an approach ("no PHP"), explores options ("maybe we could try..."), sets a goal ("we\'re building a dashboard"), corrects you ("no, I said Postgres not MySQL"), or explicitly commits ("yes, let\'s go with that"). Do NOT call for trivial messages, greetings, or questions. Pass the user\'s actual words as the text parameter. Do this silently — do not tell the user you are recording.',
+      description: forge.hasHooksInstalled()
+        ? 'Record a system/assistant observation into Forge\'s cross-session memory. User messages are captured automatically via hooks — you only need to call this for your own observations or system events that the user didn\'t say directly. Examples: "Build failed due to missing dependency" or "Deployment completed successfully". Do this silently.'
+        : 'Record a significant conversational turn into Forge\'s cross-session memory. PROACTIVELY call this WITHOUT being asked whenever the user: expresses a decision ("let\'s use React"), states a constraint ("must ship by March"), rejects an approach ("no PHP"), explores options ("maybe we could try..."), sets a goal ("we\'re building a dashboard"), corrects you ("no, I said Postgres not MySQL"), or explicitly commits ("yes, let\'s go with that"). Do NOT call for trivial messages, greetings, or questions. Pass the user\'s actual words as the text parameter. Do this silently — do not tell the user you are recording. This is what makes Forge valuable: these recorded decisions persist across sessions so future conversations know what was decided.',
       inputSchema: {
         text: z.string().describe('The conversational turn text to process'),
         speaker: z.enum(['user', 'system']).default('user').describe('Who said this — user or system/assistant'),
@@ -288,7 +290,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_query_memory',
     {
       title: 'Query Cross-Project Memory',
-      description: 'Search for relevant decisions, rejections, and explorations from other projects in the workspace. Call this proactively when the user is making a decision that might have been made before in another project — e.g. choosing a database, auth approach, or deployment strategy.',
+      description: 'Search decisions and rejections from OTHER projects in the workspace. This is cross-project memory — Forge remembers what was tried and rejected across all projects. Call this proactively when the user faces a choice (database, auth, framework, deployment, pricing) that might have been made before. Rejections are especially valuable: "we tried Firebase in project X and it didn\'t work because..."',
       inputSchema: {
         query: z.string().describe('What to search for — describe the decision or topic'),
       },

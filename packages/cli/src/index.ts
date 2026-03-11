@@ -9,6 +9,7 @@ config({ path: path.resolve(__dirname, '../../..', '.env') })
 config()
 
 import { init, turn, model, events, brief, artifacts, tensions, actions, execute, trust, workspace, workspaceRebuild, memory, test } from './commands'
+import { hookCapture } from './hook-capture'
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -88,6 +89,23 @@ async function main() {
     case 'test':
       test()
       break
+
+    case 'hook-capture': {
+      // Read text from stdin for hook-driven capture (no stdout output)
+      let stdinText = ''
+      if (args[1]) {
+        stdinText = args[1]
+      } else {
+        try {
+          const { readFileSync } = await import('fs')
+          stdinText = readFileSync(0, 'utf-8').trim()
+        } catch { /* empty stdin */ }
+      }
+      if (stdinText) {
+        await hookCapture(stdinText)
+      }
+      break
+    }
 
     default:
       console.log('GZOO Forge — Phase 1 CLI')

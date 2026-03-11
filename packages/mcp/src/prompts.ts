@@ -26,9 +26,15 @@ export function registerPrompts(mcp: McpServer, forge: ForgeServer): void {
           content: {
             type: 'text',
             text: [
-              '# Forge — Project Memory Workflow',
+              '# Forge — Cross-Session Project Memory',
               '',
-              'You have access to Forge, a persistent project intelligence system that tracks decisions, constraints, rejections, and explorations across sessions.',
+              'You have access to Forge, a persistent project memory that tracks decisions, constraints, rejections, and explorations across EVERY session.',
+              '',
+              '## Forge vs Plan Mode',
+              '- **Plan mode** = single-session task breakdown. Good for "plan how to implement feature X." Resets when the session ends.',
+              '- **Forge** = cross-session project memory. Remembers what was decided, rejected, and explored forever. Good for "what did we decide about auth last week?"',
+              '- They complement each other. Use Plan mode for within-session task planning. Forge runs in the background, capturing decisions as they happen.',
+              '- When you read forge://brief at session start, you get full context from ALL previous sessions — no need to re-ask questions or re-explore options.',
               '',
               '## How to use Forge during this conversation:',
               '',

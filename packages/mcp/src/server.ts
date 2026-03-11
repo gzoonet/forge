@@ -235,6 +235,15 @@ export class ForgeServer {
   getStore(): ProjectModelStore | null { return this.store }
 
   /**
+   * Check if auto-capture hooks are installed.
+   * When hooks are active, forge_process_turn description adapts.
+   */
+  hasHooksInstalled(): boolean {
+    const hookStateFile = path.join(process.cwd(), '.forge', 'hook-state.json')
+    return fs.existsSync(hookStateFile)
+  }
+
+  /**
    * Graceful shutdown.
    */
   shutdown(): void {
