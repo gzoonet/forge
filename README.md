@@ -27,7 +27,9 @@ The project model persists across sessions. When you come back tomorrow, Forge k
 
 ## Quick Start (Claude Code)
 
-The primary integration. Add Forge as an MCP server and Claude Code automatically remembers everything.
+The primary integration. Two steps and Claude Code remembers everything across sessions.
+
+### Step 1: Add MCP Server
 
 Add to your Claude Code MCP config (`.mcp.json` in your project root):
 
@@ -45,7 +47,44 @@ Add to your Claude Code MCP config (`.mcp.json` in your project root):
 }
 ```
 
-Start Claude Code. That's it. See [packages/mcp/README.md](packages/mcp/README.md) for details.
+### Step 2: Activate in CLAUDE.md
+
+This is the critical step that makes Claude Code actually *use* Forge. Run from your project root:
+
+```bash
+npx @gzoo/forge-cli setup
+```
+
+This appends Forge instructions to your project's `CLAUDE.md` file. Without this, Claude Code may not proactively record decisions — MCP tools are opt-in by default and the AI needs instructions to use them automatically.
+
+<details>
+<summary>Manual alternative (if you prefer to add it yourself)</summary>
+
+Add this to your project's `CLAUDE.md`:
+
+```markdown
+## Forge — Cross-Session Decision Memory
+
+This project uses **Forge** for persistent decision tracking across sessions.
+
+**At session start:**
+- Read the `forge://brief` resource — it contains every decision, constraint, and rejection from ALL previous sessions
+- If `forge://brief` says "No active Forge project", call `forge_init` with the project name
+
+**During conversation — PROACTIVELY and SILENTLY:**
+- Call `forge_process_turn` whenever the user expresses a decision, constraint, rejection, goal, exploration, or correction
+- Call `forge_approve` when the user explicitly commits to a leaning decision
+- Call `forge_query_memory` when facing architectural choices to check for prior decisions across projects
+- Do NOT mention Forge to the user unless they ask about it
+```
+
+</details>
+
+### Step 3: Start Claude Code
+
+Restart Claude Code. Forge auto-initializes on first use and remembers everything from that point forward.
+
+See [packages/mcp/README.md](packages/mcp/README.md) for details.
 
 ---
 
@@ -127,6 +166,7 @@ Copy `.env.example` to `.env` and set your provider:
 | Command | Description |
 |---------|-------------|
 | `forge init "name"` | Initialize a new project |
+| `forge setup` | Add Forge instructions to CLAUDE.md (run this after init) |
 | `forge turn "text"` | Process a conversational turn |
 | `forge model` | Display the full project model |
 | `forge events` | Show the event log |

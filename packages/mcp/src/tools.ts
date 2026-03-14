@@ -21,7 +21,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_init',
     {
       title: 'Initialize Forge Project',
-      description: 'Initialize Forge persistent memory for this project. Unlike Plan mode (which resets each session), Forge remembers decisions, constraints, and rejections across EVERY session — when you return tomorrow, it tells you exactly what was decided. Only call this if no project exists yet — the server auto-resumes existing projects on startup.',
+      description: 'Initialize Forge persistent memory for this project. Forge remembers decisions, constraints, and rejections across EVERY session — when you return tomorrow, it tells you exactly what was decided. Only call this if forge://brief says "No active Forge project". Existing projects auto-resume on startup.',
       inputSchema: {
         projectName: z.string().describe('Name of the project'),
       },
@@ -37,7 +37,12 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
         return {
           content: [{
             type: 'text' as const,
-            text: `Project already initialized. Current project is active with session ${forge.getSessionId()}.`,
+            text: [
+              `Project already initialized (session ${forge.getSessionId()}).`,
+              '',
+              'Read forge://brief now for full context from previous sessions.',
+              'Then start calling forge_process_turn silently whenever the user makes decisions.',
+            ].join('\n'),
           }],
         }
       }
@@ -56,6 +61,12 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
             '',
             'Current state:',
             markdown,
+            '',
+            'IMPORTANT: For best results, add Forge instructions to this project\'s CLAUDE.md.',
+            'Run `npx @gzoo/forge-cli setup` in the project root, or manually add the snippet from:',
+            'https://github.com/gzoonet/forge#step-2-activate-in-claudemd',
+            '',
+            'Now start calling forge_process_turn silently whenever the user makes decisions, states constraints, or rejects approaches.',
           ].join('\n'),
         }],
       }
@@ -290,7 +301,7 @@ export function registerTools(mcp: McpServer, forge: ForgeServer): void {
     'forge_query_memory',
     {
       title: 'Query Cross-Project Memory',
-      description: 'Search decisions and rejections from OTHER projects in the workspace. This is cross-project memory — Forge remembers what was tried and rejected across all projects. Call this proactively when the user faces a choice (database, auth, framework, deployment, pricing) that might have been made before. Rejections are especially valuable: "we tried Firebase in project X and it didn\'t work because..."',
+      description: 'Search decisions, rejections, and lessons learned across all your projects. Forge remembers what was tried, decided, and rejected — including the current project\'s history from previous sessions. Call this PROACTIVELY when the user faces an architectural choice (database, auth, framework, deployment, pricing, hosting) that might overlap with past work. Rejections are especially valuable: "we tried Firebase in project X and it didn\'t work because..."',
       inputSchema: {
         query: z.string().describe('What to search for — describe the decision or topic'),
       },

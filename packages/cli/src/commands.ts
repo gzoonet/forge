@@ -1,3 +1,5 @@
+import * as fs from 'fs'
+import * as path from 'path'
 import { ProjectModelStore } from '@gzoo/forge-store'
 import { ExtractionPipeline, TrustEngine, createLLMClient, resolveProviderConfig, generateSessionBrief } from '@gzoo/forge-extract'
 import type { LLMClient } from '@gzoo/forge-extract'
@@ -783,6 +785,75 @@ export async function memory(queryText: string): Promise<void> {
 
   console.log(`Query time: ${result.queryTime}ms | Source: ${result.source}`)
   store.close()
+}
+
+// ── forge setup ─────────────────────────────────────────────────────────────
+
+const CLAUDE_MD_SNIPPET = `
+## Forge — Cross-Session Decision Memory
+
+This project uses **Forge** for persistent decision tracking across sessions.
+
+**At session start:**
+- Read the \`forge://brief\` resource — it contains every decision, constraint, and rejection from ALL previous sessions
+- If \`forge://brief\` says "No active Forge project", call \`forge_init\` with the project name
+
+**During conversation — PROACTIVELY and SILENTLY:**
+- Call \`forge_process_turn\` whenever the user expresses a decision, constraint, rejection, goal, exploration, or correction
+- Call \`forge_approve\` when the user explicitly commits to a leaning decision
+- Call \`forge_query_memory\` when facing architectural choices to check for prior decisions across projects
+- Do NOT mention Forge to the user unless they ask about it
+
+**What to record:**
+- "Let's use React and TypeScript" → decision
+- "Budget must stay under $5k/month" → constraint
+- "No, we tried that and it didn't work" → rejection
+- "Maybe we could use Supabase?" → exploration
+- "The goal is to ship an MVP by April" → goal
+
+**What NOT to record:**
+- Greetings, thanks, trivial acknowledgments
+- Pure questions ("Can you explain how X works?")
+`.trimStart()
+
+const CLAUDE_MD_MARKER = '## Forge — Cross-Session Decision Memory'
+
+export function setup(): void {
+  const claudeMdPath = path.join(process.cwd(), 'CLAUDE.md')
+
+  // Check if CLAUDE.md exists
+  if (fs.existsSync(claudeMdPath)) {
+    const existing = fs.readFileSync(claudeMdPath, 'utf-8')
+
+    // Check if snippet already present
+    if (existing.includes(CLAUDE_MD_MARKER)) {
+      console.log('CLAUDE.md already contains Forge instructions. No changes needed.')
+      return
+    }
+
+    // Append
+    const separator = existing.endsWith('\n') ? '\n' : '\n\n'
+    fs.writeFileSync(claudeMdPath, existing + separator + CLAUDE_MD_SNIPPET)
+    console.log('Appended Forge instructions to existing CLAUDE.md')
+  } else {
+    // Create new
+    fs.writeFileSync(claudeMdPath, CLAUDE_MD_SNIPPET)
+    console.log('Created CLAUDE.md with Forge instructions')
+  }
+
+  // Also ensure .forge/ is in .gitignore
+  const gitignorePath = path.join(process.cwd(), '.gitignore')
+  if (fs.existsSync(gitignorePath)) {
+    const gitignore = fs.readFileSync(gitignorePath, 'utf-8')
+    if (!gitignore.includes('.forge/')) {
+      fs.appendFileSync(gitignorePath, '\n# Forge local state\n.forge/\n')
+      console.log('Added .forge/ to .gitignore')
+    }
+  }
+
+  console.log('')
+  console.log('Done! Claude Code will now use Forge automatically in this project.')
+  console.log('Restart Claude Code to pick up the new CLAUDE.md instructions.')
 }
 
 // ── forge test ───────────────────────────────────────────────────────────────

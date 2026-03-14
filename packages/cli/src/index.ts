@@ -8,7 +8,7 @@ config({ path: path.resolve(__dirname, '../../..', '.env') })
 // Also load .env from cwd (where forge is run)
 config()
 
-import { init, turn, model, events, brief, artifacts, tensions, actions, execute, trust, workspace, workspaceRebuild, memory, test } from './commands'
+import { init, turn, model, events, brief, artifacts, tensions, actions, execute, trust, workspace, workspaceRebuild, memory, setup, test } from './commands'
 import { hookCapture } from './hook-capture'
 
 const args = process.argv.slice(2)
@@ -86,6 +86,10 @@ async function main() {
       await memory(args[1])
       break
 
+    case 'setup':
+      setup()
+      break
+
     case 'test':
       test()
       break
@@ -108,10 +112,13 @@ async function main() {
     }
 
     default:
-      console.log('GZOO Forge — Phase 1 CLI')
+      console.log('GZOO Forge — Persistent Project Intelligence')
+      console.log('')
+      console.log('Getting started:')
+      console.log('  forge init "Project name"    Start a new project')
+      console.log('  forge setup                  Add Forge instructions to CLAUDE.md (recommended)')
       console.log('')
       console.log('Commands:')
-      console.log('  forge init "Project name"    Start a new project')
       console.log('  forge turn "user text"       Process a conversational turn')
       console.log('  forge model                  View current project model')
       console.log('  forge events                 View event log')
