@@ -1,14 +1,28 @@
 {
   "name": "@gzoo/forge-cli",
   "version": "0.2.0",
-  "description": "Phase 1 CLI test surface for GZOO Forge",
+  "description": "CLI for GZOO Forge — persistent project intelligence for AI-assisted development",
   "main": "./dist/index.js",
   "bin": {
-    "forge": "./dist/index.js"
+    "forge": "./dist/index.js",
+    "forge-cli": "./dist/index.js"
   },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gzoonet/forge.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["forge", "claude-code", "decision-tracking", "project-intelligence", "cli"],
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@gzoo/forge-core": "0.2.0",
@@ -20,5 +34,5 @@
   "devDependencies": {
     "typescript": "^5.7.0"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }

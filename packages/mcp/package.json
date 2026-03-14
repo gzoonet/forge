@@ -1,6 +1,6 @@
 {
   "name": "@gzoo/forge-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for GZOO Forge — persistent project intelligence for Claude Code",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

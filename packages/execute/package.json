@@ -9,6 +9,17 @@
     "build": "tsc",
     "test": "vitest run"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gzoonet/forge.git",
+    "directory": "packages/execute"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@gzoo/forge-core": "0.2.0",
     "@gzoo/forge-store": "0.2.0"
@@ -17,5 +28,5 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }
