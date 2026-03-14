@@ -1,10 +1,12 @@
 node_modules/
 dist/
 *.db
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
 .forge/
+.claude/
 .mcp.json
 public/
 continuity-engine-plan.md
