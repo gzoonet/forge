@@ -3,7 +3,7 @@ import * as path from 'path'
 import { ProjectModelStore } from '@gzoo/forge-store'
 import { ExtractionPipeline, createLLMClient, resolveProviderConfig } from '@gzoo/forge-extract'
 import type { LLMClient } from '@gzoo/forge-extract'
-import type { NodeId, ConversationalTurn, ExtractionResult, ProjectModel, SessionBrief } from '@gzoo/forge-core'
+import { createProvenance, type NodeId, type ConversationalTurn, type ExtractionResult, type ProjectModel, type SessionBrief } from '@gzoo/forge-core'
 import { generateSessionBrief } from '@gzoo/forge-extract'
 
 // ─── State Persistence ──────────────────────────────────────────────────────
@@ -145,7 +145,6 @@ export class ForgeServer {
       return { success: false, error: `No matching leaning decision found for: "${decisionHint}"` }
     }
 
-    const { createProvenance } = require('@gzoo/forge-core')
     const provenance = createProvenance(this.sessionId!, this.turnIndex, `Approved: ${target.text}`)
 
     this.store!.appendEvent(
@@ -162,6 +161,86 @@ export class ForgeServer {
     )
 
     return { success: true, decisionId: target.id, statement: target.text }
+  }
+
+  /**
+   * Resolve or dismiss a single tension by fuzzy-matching its description.
+   */
+  resolveTension(tensionHint: string, resolution: string, action: 'resolve' | 'dismiss'): {
+    success: boolean
+    tensionId?: string
+    description?: string
+    error?: string
+  } {
+    this.ensureInitialized()
+    const model = this.store!.getProjectModel(this.projectId! as NodeId)
+
+    // Find active or acknowledged tensions
+    const candidates = Array.from(model.tensions.values())
+      .filter(t => t.status === 'active' || t.status === 'acknowledged')
+    if (candidates.length === 0) {
+      return { success: false, error: 'No active tensions to resolve' }
+    }
+
+    const target = findBestMatch(tensionHint, candidates.map(t => ({ id: t.id, text: t.description })))
+    if (!target) {
+      return { success: false, error: `No matching tension found for: "${tensionHint}"` }
+    }
+
+    const resolutionText = action === 'dismiss' ? `Dismissed: ${resolution}` : resolution
+    const provenance = createProvenance(this.sessionId!, this.turnIndex, resolutionText)
+
+    this.store!.appendEvent(
+      {
+        type: 'TENSION_RESOLVED',
+        tensionId: target.id as NodeId,
+        resolution: resolutionText,
+        provenance,
+      },
+      { projectId: this.projectId!, sessionId: this.sessionId!, turnIndex: this.turnIndex }
+    )
+
+    return { success: true, tensionId: target.id, description: target.text }
+  }
+
+  /**
+   * Bulk-resolve all active tensions matching a severity filter.
+   */
+  bulkResolveTensions(filter: 'all' | 'informational' | 'significant' | 'blocking', resolution: string): {
+    success: boolean
+    resolvedCount: number
+    error?: string
+  } {
+    this.ensureInitialized()
+    const model = this.store!.getProjectModel(this.projectId! as NodeId)
+
+    let candidates = Array.from(model.tensions.values())
+      .filter(t => t.status === 'active' || t.status === 'acknowledged')
+
+    if (filter !== 'all') {
+      candidates = candidates.filter(t => t.severity === filter)
+    }
+
+    if (candidates.length === 0) {
+      return { success: true, resolvedCount: 0 }
+    }
+
+    const provenance = createProvenance(this.sessionId!, this.turnIndex, `Bulk resolved: ${resolution}`)
+    const context = { projectId: this.projectId!, sessionId: this.sessionId!, turnIndex: this.turnIndex }
+
+    for (const tension of candidates) {
+      this.store!.appendEvent(
+        {
+          type: 'TENSION_RESOLVED',
+          tensionId: tension.id,
+          resolution,
+          provenance,
+        },
+        context
+      )
+    }
+
+    return { success: true, resolvedCount: candidates.length }
   }
 
   /**

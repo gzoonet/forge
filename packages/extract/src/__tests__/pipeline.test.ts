@@ -1116,7 +1116,7 @@ describe('Scenario 4.4 — Intra-turn tension detection', () => {
     // Create an existing constraint
     mockLLM.addClassifyResponse('constraint_stated', 'high')
     mockLLM.addExtractResponse('constraint', {
-      statement: 'Application must work completely offline with local storage only',
+      statement: 'Application data syncing must work completely offline with local storage only',
       hardness: 'hard',
       type: 'technical',
       certainty: 'evidenced',
@@ -1125,9 +1125,15 @@ describe('Scenario 4.4 — Intra-turn tension detection', () => {
 
     // Add a conflicting constraint
     mockLLM.reset()
+    // Mock the LLM conflict check FIRST (before extract response, since extract matcher
+    // also matches on system containing 'constraint' which would greedily catch this)
+    mockLLM.addResponse(
+      (req) => req.prompt.includes('Do these two constraints conflict'),
+      JSON.stringify({ isConflicting: true, description: 'Offline vs real-time sync conflict', severity: 'significant' })
+    )
     mockLLM.addClassifyResponse('constraint_stated', 'high')
     mockLLM.addExtractResponse('constraint', {
-      statement: 'Real-time collaboration and live syncing across all devices required',
+      statement: 'Application data syncing must be real-time across all devices with cloud storage',
       hardness: 'hard',
       type: 'technical',
       certainty: 'evidenced',

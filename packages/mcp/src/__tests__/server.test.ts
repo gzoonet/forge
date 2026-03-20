@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { ForgeServer } from '../server'
+import { createId, createProvenance, type Tension, type NodeId } from '@gzoo/forge-core'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -130,5 +131,142 @@ describe('ForgeServer', () => {
 
     expect(() => server.getModel()).toThrow('No active project')
     expect(() => server.getBrief()).toThrow('No active project')
+  })
+})
+
+// ── Helper: seed a tension into the store ────────────────────────────────
+
+function seedTension(
+  server: ForgeServer,
+  overrides: Partial<Tension> & { description: string; severity: Tension['severity'] }
+): Tension {
+  const store = server.getStore()!
+  const projectId = server.getProjectId()!
+  const sessionId = server.getSessionId()!
+  const prov = createProvenance(sessionId, 0, 'test seed')
+
+  const tension: Tension = {
+    id: overrides.id ?? createId('tension'),
+    description: overrides.description,
+    nodeAId: overrides.nodeAId ?? createId('constraint'),
+    nodeBId: overrides.nodeBId ?? createId('constraint'),
+    nodeAType: overrides.nodeAType ?? 'constraint',
+    nodeBType: overrides.nodeBType ?? 'constraint',
+    severity: overrides.severity,
+    detectedAt: new Date(),
+    provenance: prov,
+    status: overrides.status ?? 'active',
+  }
+
+  store.appendEvent(
+    { type: 'NODE_CREATED', nodeType: 'tension', node: tension, provenance: prov },
+    { projectId, sessionId, turnIndex: 0 }
+  )
+
+  return tension
+}
+
+describe('ForgeServer — tension resolution', () => {
+  it('resolveTension returns error when no active tensions', () => {
+    const server = new ForgeServer()
+    server.initProject('Resolve Test')
+
+    const result = server.resolveTension('anything', 'reason', 'resolve')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('No active tensions')
+
+    server.shutdown()
+  })
+
+  it('resolveTension resolves a tension by hint', () => {
+    const server = new ForgeServer()
+    server.initProject('Resolve Test')
+
+    seedTension(server, {
+      description: 'Conflict between PostgreSQL requirement and SQLite preference',
+      severity: 'significant',
+    })
+
+    const result = server.resolveTension('PostgreSQL SQLite', 'Chose PostgreSQL', 'resolve')
+    expect(result.success).toBe(true)
+    expect(result.description).toContain('PostgreSQL')
+
+    // Verify tension is now resolved in the model
+    const model = server.getModel()
+    const resolved = Array.from(model.tensions.values()).find(t => t.id === result.tensionId)
+    expect(resolved?.status).toBe('resolved')
+    expect(resolved?.resolution).toBe('Chose PostgreSQL')
+
+    server.shutdown()
+  })
+
+  it('resolveTension with dismiss prepends "Dismissed:" to resolution', () => {
+    const server = new ForgeServer()
+    server.initProject('Dismiss Test')
+
+    seedTension(server, {
+      description: 'False positive between CSP and DeepSeek',
+      severity: 'significant',
+    })
+
+    const result = server.resolveTension('CSP DeepSeek', 'Unrelated constraints', 'dismiss')
+    expect(result.success).toBe(true)
+
+    const model = server.getModel()
+    const tension = Array.from(model.tensions.values()).find(t => t.id === result.tensionId)
+    expect(tension?.resolution).toBe('Dismissed: Unrelated constraints')
+
+    server.shutdown()
+  })
+
+  it('bulkResolveTensions resolves by severity filter', () => {
+    const server = new ForgeServer()
+    server.initProject('Bulk Test')
+
+    seedTension(server, { description: 'Info tension 1', severity: 'informational' })
+    seedTension(server, { description: 'Info tension 2', severity: 'informational' })
+    seedTension(server, { description: 'Sig tension 1', severity: 'significant' })
+
+    const result = server.bulkResolveTensions('informational', 'Cleanup')
+    expect(result.success).toBe(true)
+    expect(result.resolvedCount).toBe(2)
+
+    // Significant tension should still be active
+    const model = server.getModel()
+    const active = Array.from(model.tensions.values()).filter(t => t.status === 'active')
+    expect(active.length).toBe(1)
+    expect(active[0].severity).toBe('significant')
+
+    server.shutdown()
+  })
+
+  it('bulkResolveTensions with "all" resolves everything', () => {
+    const server = new ForgeServer()
+    server.initProject('Bulk All Test')
+
+    seedTension(server, { description: 'Tension A', severity: 'informational' })
+    seedTension(server, { description: 'Tension B', severity: 'significant' })
+    seedTension(server, { description: 'Tension C', severity: 'blocking' })
+
+    const result = server.bulkResolveTensions('all', 'Full cleanup')
+    expect(result.success).toBe(true)
+    expect(result.resolvedCount).toBe(3)
+
+    const model = server.getModel()
+    const active = Array.from(model.tensions.values()).filter(t => t.status === 'active')
+    expect(active.length).toBe(0)
+
+    server.shutdown()
+  })
+
+  it('bulkResolveTensions returns zero when no matching tensions', () => {
+    const server = new ForgeServer()
+    server.initProject('Empty Bulk Test')
+
+    const result = server.bulkResolveTensions('all', 'Nothing to do')
+    expect(result.success).toBe(true)
+    expect(result.resolvedCount).toBe(0)
+
+    server.shutdown()
   })
 })

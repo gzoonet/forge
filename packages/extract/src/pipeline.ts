@@ -20,7 +20,7 @@ import type { LLMClient } from './llm-client'
 import { classify } from './classifier'
 import { extract, isExtractable, type ExtractedNode } from './extractor'
 import { checkArtifactTrigger, generateSpecArtifact } from './artifact-engine'
-import { checkPropagation, applyPropagationResults, constraintsMayConflict } from './constraint-engine'
+import { checkPropagation, applyPropagationResults, constraintsMayConflict, checkConstraintConflictLLM, MAX_TENSIONS_PER_CONSTRAINT } from './constraint-engine'
 import { TrustEngine } from './trust-engine'
 import type { SurfacingDecision, MemoryMatch, CortexMatch, SessionBrief } from '@gzoo/forge-core'
 import { generateSessionBrief } from './session-brief'
@@ -277,8 +277,8 @@ export class ExtractionPipeline {
     const newConstraints = modelUpdates.filter(u => u.targetLayer === 'constraints' && u.operation === 'insert')
     if (newConstraints.length >= 1) {
       const currentModel = this.store.getProjectModel(projectId)
-      const intraTurnTensions = this.detectIntraTurnTensions(
-        newConstraints, currentModel, turn.sessionId, turn.turnIndex, classification.confidence
+      const intraTurnTensions = await this.detectIntraTurnTensions(
+        newConstraints, currentModel, turn.sessionId, turn.turnIndex, classification.confidence, this.llmClient
       )
       for (const tensionUpdate of intraTurnTensions) {
         modelUpdates.push(tensionUpdate)
@@ -805,13 +805,14 @@ export class ExtractionPipeline {
     return null
   }
 
-  private detectIntraTurnTensions(
+  private async detectIntraTurnTensions(
     newConstraintUpdates: ModelUpdate[],
     model: ProjectModel,
     sessionId: string,
     turnIndex: number,
-    confidence: 'high' | 'medium' | 'low'
-  ): ModelUpdate[] {
+    confidence: 'high' | 'medium' | 'low',
+    llmClient?: LLMClient | null
+  ): Promise<ModelUpdate[]> {
     const results: ModelUpdate[] = []
     const provenance = createProvenance(sessionId, turnIndex, '', confidence)
 
@@ -822,38 +823,72 @@ export class ExtractionPipeline {
       if (c) newConstraints.push(c)
     }
 
+    // Track per-constraint tension counts (including existing tensions)
+    const tensionCounts = new Map<string, number>()
+    for (const t of model.tensions.values()) {
+      if (t.status !== 'active') continue
+      tensionCounts.set(t.nodeAId, (tensionCounts.get(t.nodeAId) ?? 0) + 1)
+      tensionCounts.set(t.nodeBId, (tensionCounts.get(t.nodeBId) ?? 0) + 1)
+    }
+
+    const createTension = (description: string, aId: NodeId, bId: NodeId, severity: 'informational' | 'significant' | 'blocking') => {
+      // Enforce tension cap per constraint
+      const aCount = tensionCounts.get(aId) ?? 0
+      const bCount = tensionCounts.get(bId) ?? 0
+      if (aCount >= MAX_TENSIONS_PER_CONSTRAINT || bCount >= MAX_TENSIONS_PER_CONSTRAINT) {
+        console.warn(`[forge-extract] Tension cap reached for constraint — skipping: ${description.slice(0, 80)}`)
+        return null
+      }
+
+      const tensionId = createId('tension')
+      const tension: Tension = {
+        id: tensionId,
+        description,
+        nodeAId: aId,
+        nodeBId: bId,
+        nodeAType: 'constraint',
+        nodeBType: 'constraint',
+        severity,
+        detectedAt: new Date(),
+        provenance,
+        status: 'active',
+      }
+
+      this.store.appendEvent({
+        type: 'NODE_CREATED',
+        nodeType: 'tension',
+        node: tension,
+        provenance,
+      }, { projectId: model.id, sessionId, turnIndex })
+
+      // Update counts
+      tensionCounts.set(aId, aCount + 1)
+      tensionCounts.set(bId, bCount + 1)
+
+      results.push({
+        operation: 'insert',
+        targetLayer: 'tensions',
+        nodeId: tensionId,
+        changes: { type: 'intra_turn_conflict' },
+      })
+      return tensionId
+    }
+
     // Check new constraints against each other
     for (let i = 0; i < newConstraints.length; i++) {
       for (let j = i + 1; j < newConstraints.length; j++) {
-        if (constraintsMayConflict(newConstraints[i], newConstraints[j])) {
-          const tensionId = createId('tension')
-          const tension: Tension = {
-            id: tensionId,
-            description: `Potential conflict between "${newConstraints[i].statement}" and "${newConstraints[j].statement}"`,
-            nodeAId: newConstraints[i].id,
-            nodeBId: newConstraints[j].id,
-            nodeAType: 'constraint',
-            nodeBType: 'constraint',
-            severity: 'significant',
-            detectedAt: new Date(),
-            provenance,
-            status: 'active',
-          }
+        if (!constraintsMayConflict(newConstraints[i], newConstraints[j])) continue
 
-          this.store.appendEvent({
-            type: 'NODE_CREATED',
-            nodeType: 'tension',
-            node: tension,
-            provenance,
-          }, { projectId: model.id, sessionId, turnIndex })
-
-          results.push({
-            operation: 'insert',
-            targetLayer: 'tensions',
-            nodeId: tensionId,
-            changes: { type: 'intra_turn_conflict' },
-          })
+        // LLM verification if available
+        if (llmClient) {
+          const isReal = await checkConstraintConflictLLM(newConstraints[i], newConstraints[j], llmClient)
+          if (!isReal) continue
         }
+
+        createTension(
+          `Potential conflict between "${newConstraints[i].statement}" and "${newConstraints[j].statement}"`,
+          newConstraints[i].id, newConstraints[j].id, 'significant'
+        )
       }
     }
 
@@ -863,35 +898,18 @@ export class ExtractionPipeline {
     )
     for (const newC of newConstraints) {
       for (const existC of existingConstraints) {
-        if (constraintsMayConflict(newC, existC)) {
-          const tensionId = createId('tension')
-          const tension: Tension = {
-            id: tensionId,
-            description: `New constraint "${newC.statement}" may conflict with existing "${existC.statement}"`,
-            nodeAId: newC.id,
-            nodeBId: existC.id,
-            nodeAType: 'constraint',
-            nodeBType: 'constraint',
-            severity: 'significant',
-            detectedAt: new Date(),
-            provenance,
-            status: 'active',
-          }
+        if (!constraintsMayConflict(newC, existC)) continue
 
-          this.store.appendEvent({
-            type: 'NODE_CREATED',
-            nodeType: 'tension',
-            node: tension,
-            provenance,
-          }, { projectId: model.id, sessionId, turnIndex })
-
-          results.push({
-            operation: 'insert',
-            targetLayer: 'tensions',
-            nodeId: tensionId,
-            changes: { type: 'intra_turn_conflict' },
-          })
+        // LLM verification if available
+        if (llmClient) {
+          const isReal = await checkConstraintConflictLLM(newC, existC, llmClient)
+          if (!isReal) continue
         }
+
+        createTension(
+          `New constraint "${newC.statement}" may conflict with existing "${existC.statement}"`,
+          newC.id, existC.id, 'significant'
+        )
       }
     }
 

@@ -139,15 +139,37 @@ export async function detectConstraintConflicts(
   return conflicts
 }
 
-export function constraintsMayConflict(a: Constraint, b: Constraint): boolean {
-  // Same type of constraint with different orientations suggests conflict
-  if (a.type === b.type) return true
-  // Check for keyword overlap that might indicate the same topic
-  const aWords = a.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
-  const bWords = b.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
-  const overlap = aWords.filter(w => bWords.includes(w))
-  return overlap.length >= 2
+// Stop words: common constraint-language words that don't indicate topical overlap
+const CONSTRAINT_STOP_WORDS = new Set([
+  'must', 'should', 'shall', 'needs', 'require', 'required',
+  'using', 'allow', 'about', 'every', 'always', 'never',
+  'could', 'would', 'might', 'where', 'which', 'their',
+  'there', 'these', 'those', 'other', 'being', 'after',
+  'before', 'while', 'since', 'under', 'above', 'below',
+  'between', 'through', 'during', 'without', 'within',
+  'implement', 'display', 'ensure', 'create', 'update',
+])
+
+function extractMeaningfulKeywords(statement: string): string[] {
+  return statement.toLowerCase()
+    .split(/\s+/)
+    .filter(w => w.length > 4 && !CONSTRAINT_STOP_WORDS.has(w))
 }
+
+export function constraintsMayConflict(a: Constraint, b: Constraint): boolean {
+  const aWords = extractMeaningfulKeywords(a.statement)
+  const bWords = new Set(extractMeaningfulKeywords(b.statement))
+  const overlap = aWords.filter(w => bWords.has(w))
+
+  // Same type requires at least 1 meaningful keyword overlap
+  if (a.type === b.type && overlap.length >= 1) return true
+  // Cross-type requires 3+ meaningful keyword overlap
+  if (overlap.length >= 3) return true
+  return false
+}
+
+// Maximum tensions any single constraint can participate in before being flagged as overbroad
+export const MAX_TENSIONS_PER_CONSTRAINT = 5
 
 // ── LLM-Assisted Conflict Verification ──────────────────────────────────────
 

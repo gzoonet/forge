@@ -3,6 +3,7 @@ import {
   computeConstraintScore,
   detectConstraintConflicts,
   checkConstraintConflictLLM,
+  constraintsMayConflict,
 } from '../constraint-engine'
 import type { LLMClient } from '../llm-client'
 import {
@@ -149,13 +150,13 @@ describe('Constraint Conflict Detection', () => {
     const model = createEmptyModel()
 
     const stated = createTestConstraint({
-      statement: 'Must be enterprise-grade, built for scale',
+      statement: 'System architecture should be enterprise-grade and built for massive scale',
       type: 'operational',
       isRevealed: false,
       source: 'stated',
     })
     const revealed = createTestConstraint({
-      statement: 'Prefers simplicity and solo-maintainable systems',
+      statement: 'System architecture should be simple and solo-maintainable',
       type: 'operational',
       isRevealed: true,
       source: 'revealed',
@@ -181,14 +182,14 @@ describe('Constraint Conflict Detection', () => {
 
     // Create constraints that will have similar scores
     const stated = createTestConstraint({
-      statement: 'Must support multi-tenancy',
+      statement: 'Tenant architecture should support multi-tenancy',
       type: 'technical',
       isRevealed: false,
       source: 'stated',
       originStatementTurn: 8, // Recent
     })
     const revealed = createTestConstraint({
-      statement: 'Should use single-tenant architecture',
+      statement: 'Tenant architecture should be single-tenant only',
       type: 'technical',
       isRevealed: true,
       source: 'revealed',
@@ -302,12 +303,12 @@ describe('LLM-assisted constraint conflict detection', () => {
     const model = createEmptyModel()
 
     const stated = createTestConstraint({
-      statement: 'Must support offline mode',
+      statement: 'Application storage should support offline mode',
       type: 'technical',
       isRevealed: false,
     })
     const revealed = createTestConstraint({
-      statement: 'Prefers cloud-only architecture',
+      statement: 'Application storage should be cloud-only',
       type: 'technical',
       isRevealed: true,
       source: 'revealed',
@@ -331,7 +332,7 @@ describe('Scenario 3.1 — Stated vs Revealed Conflict', () => {
 
     // Stated constraint: early, single instance, low recency
     const stated = createTestConstraint({
-      statement: 'Must be enterprise-grade, built for scale',
+      statement: 'System architecture should be enterprise-grade and built for massive scale',
       type: 'operational',
       isRevealed: false,
       source: 'stated',
@@ -340,7 +341,7 @@ describe('Scenario 3.1 — Stated vs Revealed Conflict', () => {
 
     // Revealed constraint: multiple evidence, recent
     const revealed = createTestConstraint({
-      statement: 'Prefers simplicity and solo-maintainable systems',
+      statement: 'System architecture should be simple and solo-maintainable',
       type: 'operational',
       isRevealed: true,
       source: 'revealed',
@@ -371,6 +372,40 @@ describe('Scenario 3.1 — Stated vs Revealed Conflict', () => {
     const conflicts = await detectConstraintConflicts(model, 15, 20)
     expect(conflicts.length).toBe(1)
     expect(conflicts[0].winner).toBe('revealed')
+  })
+})
+
+describe('constraintsMayConflict pre-filter', () => {
+  it('rejects constraints sharing only stop words', () => {
+    const a = createTestConstraint({ statement: 'Must use DeepSeek for LLM calls', type: 'technical' })
+    const b = createTestConstraint({ statement: 'Must allow lh3.googleusercontent.com in CSP img-src', type: 'technical' })
+    expect(constraintsMayConflict(a, b)).toBe(false)
+  })
+
+  it('same type with no meaningful keyword overlap does not conflict', () => {
+    const a = createTestConstraint({ statement: 'Must use PostgreSQL for the database', type: 'technical' })
+    const b = createTestConstraint({ statement: 'Must implement OAuth with Clerk', type: 'technical' })
+    expect(constraintsMayConflict(a, b)).toBe(false)
+  })
+
+  it('same type with meaningful keyword overlap does conflict', () => {
+    const a = createTestConstraint({ statement: 'Must use PostgreSQL for the database', type: 'technical' })
+    const b = createTestConstraint({ statement: 'Database should be SQLite not PostgreSQL', type: 'technical' })
+    expect(constraintsMayConflict(a, b)).toBe(true)
+  })
+
+  it('cross-type requires 3+ meaningful keyword overlap', () => {
+    const a = createTestConstraint({ statement: 'Deploy the Node.js application to production', type: 'technical' })
+    const b = createTestConstraint({ statement: 'Budget for production hosting', type: 'financial' })
+    // Only "production" overlaps — fewer than 3, should not conflict
+    expect(constraintsMayConflict(a, b)).toBe(false)
+  })
+
+  it('cross-type with 3+ meaningful overlap does conflict', () => {
+    const a = createTestConstraint({ statement: 'Deploy the Redis cluster cache server to production', type: 'technical' })
+    const b = createTestConstraint({ statement: 'Budget for production Redis cluster hosting', type: 'financial' })
+    // "production", "redis", "cluster" overlap — 3 meaningful words
+    expect(constraintsMayConflict(a, b)).toBe(true)
   })
 })
 
