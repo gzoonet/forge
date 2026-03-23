@@ -273,20 +273,20 @@ function parseMarkdownSections(markdown: string): ParsedSection[] {
 }
 
 function findRelatedDecisions(text: string, decisions: Decision[]): NodeId[] {
-  const lower = text.toLowerCase()
+  const lower = (text ?? '').toLowerCase()
   return decisions
     .filter(d => {
-      const keywords = d.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
+      const keywords = (d.statement ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 4)
       return keywords.some(k => lower.includes(k))
     })
     .map(d => d.id)
 }
 
 function findRelatedConstraints(text: string, constraints: Constraint[]): NodeId[] {
-  const lower = text.toLowerCase()
+  const lower = (text ?? '').toLowerCase()
   return constraints
     .filter(c => {
-      const keywords = c.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
+      const keywords = (c.statement ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 4)
       return keywords.some(k => lower.includes(k))
     })
     .map(c => c.id)

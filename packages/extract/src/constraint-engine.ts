@@ -75,6 +75,7 @@ export function computeConstraintScore(
 }
 
 function isContradictory(a: string, b: string): boolean {
+  if (!a || !b) return false
   // Simple heuristic — check for negation patterns
   const aLower = a.toLowerCase()
   const bLower = b.toLowerCase()
@@ -151,7 +152,7 @@ const CONSTRAINT_STOP_WORDS = new Set([
 ])
 
 function extractMeaningfulKeywords(statement: string): string[] {
-  return statement.toLowerCase()
+  return (statement ?? '').toLowerCase()
     .split(/\s+/)
     .filter(w => w.length > 4 && !CONSTRAINT_STOP_WORDS.has(w))
 }

@@ -537,8 +537,8 @@ export class ProjectModelStore {
   }
 
   private computeRelevance(query: string, target: string): number {
-    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-    const targetWords = target.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    const queryWords = (query ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 2)
+    const targetWords = (target ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 2)
     if (queryWords.length === 0 || targetWords.length === 0) return 0
 
     // Expand both sides with domain synonyms

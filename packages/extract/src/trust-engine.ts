@@ -357,12 +357,12 @@ export class TrustEngine {
 
     // Check 1: Overlap with explicit outOfScope items
     const outOfScopeKeywords = model.intent.scope.outOfScope
-      .flatMap(s => s.description.toLowerCase().split(/\s+/).filter(w => w.length > 4))
+      .flatMap(s => (s.description ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 4))
 
     // Check 2: Low overlap with inScope items (drift into genuinely new territory)
     const inScopeKeywords = model.intent.scope.inScope
-      .flatMap(s => s.description.toLowerCase().split(/\s+/).filter(w => w.length > 4))
-    const goalKeywords = model.intent.primaryGoal.statement.toLowerCase().split(/\s+/).filter(w => w.length > 4)
+      .flatMap(s => (s.description ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 4))
+    const goalKeywords = (model.intent.primaryGoal.statement ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 4)
     const allScopeKeywords = [...new Set([...inScopeKeywords, ...goalKeywords])]
 
     for (const update of newItems) {

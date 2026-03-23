@@ -939,9 +939,10 @@ export class ExtractionPipeline {
         const rejection = model.rejections.get(rejUpdate.nodeId)
         if (!rejection) continue
 
-        const rejLower = rejection.statement.toLowerCase()
+        const rejStatement = rejection.statement ?? ''
+        const rejLower = rejStatement.toLowerCase()
         const matchingOption = exploration.consideredOptions.find(opt =>
-          rejLower.includes(opt.toLowerCase()) || opt.toLowerCase().includes(rejection.statement.toLowerCase().slice(0, 20))
+          rejLower.includes((opt ?? '').toLowerCase()) || (opt ?? '').toLowerCase().includes(rejLower.slice(0, 20))
         )
 
         if (!matchingOption) continue
