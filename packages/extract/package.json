@@ -1,6 +1,6 @@
 {
   "name": "@gzoo/forge-extract",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Two-stage extraction pipeline for GZOO Forge",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
