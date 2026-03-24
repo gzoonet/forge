@@ -380,12 +380,12 @@ function findBestMatch(
   if (candidates.length === 0) return null
   if (candidates.length === 1) return candidates[0]
 
-  const hintWords = new Set(hint.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+  const hintWords = new Set((hint ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 2))
   let best: { id: string; text: string } | null = null
   let bestScore = 0
 
   for (const c of candidates) {
-    const cWords = new Set(c.text.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+    const cWords = new Set((c.text ?? '').toLowerCase().split(/\s+/).filter(w => w.length > 2))
     const intersection = new Set([...hintWords].filter(w => cWords.has(w)))
     const union = new Set([...hintWords, ...cWords])
     const score = union.size > 0 ? intersection.size / union.size : 0

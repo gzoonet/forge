@@ -337,7 +337,7 @@ export class TrustEngine {
   }
 
   confirmScopeExpansion(topic: string): void {
-    this.scopeDriftConfirmedTopics.add(topic.toLowerCase())
+    this.scopeDriftConfirmedTopics.add((topic ?? '').toLowerCase())
     this.scopeDriftTurnCount = 0
   }
 

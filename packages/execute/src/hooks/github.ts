@@ -306,7 +306,7 @@ export class GitHubHook implements ExecutionHook {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function slugify(name: string): string {
-  return name
+  return (name ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')

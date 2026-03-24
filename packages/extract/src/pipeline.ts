@@ -692,7 +692,7 @@ export class ExtractionPipeline {
     ])
 
     const tokenize = (text: string): Set<string> => {
-      const words = text.toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !STOPWORDS.has(w))
+      const words = (text ?? '').toLowerCase().split(/\s+/).filter(w => w.length >= 3 && !STOPWORDS.has(w))
       return new Set(words)
     }
 
